@@ -20,9 +20,9 @@ on:
         required: true
         default: 'generic'
       rootfs_size:
-        description: '根文件系统分区大小 (MiB, 如 1024)'
+        description: '根文件系统分区大小 (MiB, 如 256)'
         required: true
-        default: '1024'
+        default: '256'
 
 jobs:
   build_job:
@@ -100,7 +100,13 @@ jobs:
       - name: 构建自定义固件
         working-directory: ./openwrt-imagebuilder-${{ inputs.version }}-${{ inputs.target }}-${{ inputs.subtarget }}.Linux-x86_64
         run: |
-          PACKAGES="luci luci-theme-argon luci-app-openclash clash luci-app-adguardhome adguardhome luci-app-quickstart luci-app-dockerman luci-app-nikki luci-app-store luci-app-upnp luci-app-lucky luci-compat luci-ssl kmod-tun dnsmasq-full bash curl ca-bundle ipset ip-full iptables iptables-mod-tproxy iptables-mod-extra ruby ruby-yaml kmod-inet-diag unzip"
+          PACKAGES="\
+            luci luci-theme-argon luci-app-openclash clash \
+            luci-app-adguardhome adguardhome luci-app-quickstart luci-app-dockerman \
+            luci-app-nikki luci-app-store luci-app-upnp luci-app-lucky \
+            luci-compat luci-ssl kmod-tun dnsmasq-full bash curl ca-bundle \
+            ipset ip-full iptables iptables-mod-tproxy iptables-mod-extra \
+            ruby ruby-yaml kmod-inet-diag unzip"
           echo "开始构建固件，包列表: $PACKAGES"
           make image PROFILE="${{ inputs.profile }}" PACKAGES="$PACKAGES" FILES="../files/" EXTRA_IMAGE_NAME="自定义" ROOTFS_PARTSIZE="${{ inputs.rootfs_size }}" || { echo "构建固件失败"; exit 1; }
 
