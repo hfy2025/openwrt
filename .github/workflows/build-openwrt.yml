@@ -3,23 +3,23 @@ name: 构建 OpenWrt 固件
 on:
   workflow_dispatch:
     inputs:
-      版本:
+      version:
         description: 'OpenWrt 版本号 (如 24.10.2)'
         required: true
         default: '24.10.2'
-      目标:
+      target:
         description: '目标架构 (如 x86)'
         required: true
         default: 'x86'
-      子目标:
+      subtarget:
         description: '子目标 (如 64)'
         required: true
         default: '64'
-      配置文件:
+      profile:
         description: '设备配置文件 (如 generic)'
         required: true
         default: 'generic'
-      分区大小:
+      rootfs_size:
         description: '根文件系统分区大小 (MiB, 如 256)'
         required: true
         default: '256'
@@ -36,8 +36,8 @@ jobs:
 
       - name: 下载 OpenWrt 镜像构建工具
         run: |
-          URL="https://downloads.openwrt.org/releases/${{ inputs.版本 }}/targets/${{ inputs.目标 }}/${{ inputs.子目标 }}/openwrt-imagebuilder-${{ inputs.版本 }}-${{ inputs.目标 }}-${{ inputs.子目标 }}.Linux-x86_64.tar.zst"
-          wget $URL || wget "http://mirror2.openwrt.org/releases/${{ inputs.版本 }}/targets/${{ inputs.目标 }}/${{ inputs.子目标 }}/openwrt-imagebuilder-${{ inputs.版本 }}-${{ inputs.目标 }}-${{ inputs.子目标 }}.Linux-x86_64.tar.zst"
+          URL="https://downloads.openwrt.org/releases/${{ inputs.version }}/targets/${{ inputs.target }}/${{ inputs.subtarget }}/openwrt-imagebuilder-${{ inputs.version }}-${{ inputs.target }}-${{ inputs.subtarget }}.Linux-x86_64.tar.zst"
+          wget $URL || wget "http://mirror2.openwrt.org/releases/${{ inputs.version }}/targets/${{ inputs.target }}/${{ inputs.subtarget }}/openwrt-imagebuilder-${{ inputs.version }}-${{ inputs.target }}-${{ inputs.subtarget }}.Linux-x86_64.tar.zst"
           zstd -d *.tar.zst
           tar -xvf *.tar
           cd openwrt-imagebuilder-*
@@ -68,7 +68,7 @@ jobs:
       - name: 更新软件源并添加自定义源
         working-directory: ./openwrt-imagebuilder-*
         run: |
-          echo "src/gz openwrt_luci https://downloads.openwrt.org/releases/${{ inputs.版本 }}/packages/${{ inputs.目标 }}/luci" >> repositories.conf
+          echo "src/gz openwrt_luci https://downloads.openwrt.org/releases/${{ inputs.version }}/packages/${{ inputs.target }}/luci" >> repositories.conf
           echo "src/gz custom_packages file://${PWD}/packages" >> repositories.conf
           make defconfig
 
@@ -76,10 +76,10 @@ jobs:
         working-directory: ./openwrt-imagebuilder-*
         run: |
           PACKAGES="luci luci-theme-argon luci-app-openclash luci-app-adguardhome luci-app-quickstart luci-app-dockerman luci-app-nikki luci-app-store luci-app-upnp luci-app-lucky adguardhome dnsmasq-full -dnsmasq"
-          make image PROFILE="${{ inputs.配置文件 }}" PACKAGES="$PACKAGES" FILES="../files/" EXTRA_IMAGE_NAME="自定义" ROOTFS_PARTSIZE="${{ inputs.分区大小 }}"
+          make image PROFILE="${{ inputs.profile }}" PACKAGES="$PACKAGES" FILES="../files/" EXTRA_IMAGE_NAME="自定义" ROOTFS_PARTSIZE="${{ inputs.rootfs_size }}"
 
       - name: 上传固件
         uses: actions/upload-artifact@v4
         with:
           name: openwrt-固件
-          path: ./openwrt-imagebuilder-*/bin/targets/${{ inputs.目标 }}/${{ inputs.子目标 }}/*
+          path: ./openwrt-imagebuilder-*/bin/targets/${{ inputs.target }}/${{ inputs.subtarget }}/*
