@@ -20,9 +20,9 @@ on:
         required: true
         default: 'generic'
       rootfs_size:
-        description: '根文件系统分区大小 (MiB, 如 1024)'
+        description: '根文件系统分区大小 (MiB, 如 256)'
         required: true
-        default: '1024'
+        default: '256'
 
 jobs:
   build_job:
@@ -30,10 +30,12 @@ jobs:
     steps:
       - name: 检出代码仓库
         uses: actions/checkout@v4
+
       - name: 安装依赖工具
         run: |
           sudo apt-get update
           sudo apt-get install -y zstd build-essential libncurses5-dev gawk git gettext
+
       - name: 下载 OpenWrt 镜像构建工具
         run: |
           URL="https://downloads.openwrt.org/releases/${{ inputs.version }}/targets/${{ inputs.target }}/${{ inputs.subtarget }}/openwrt-imagebuilder-${{ inputs.version }}-${{ inputs.target }}-${{ inputs.subtarget }}.Linux-x86_64.tar.zst"
@@ -43,10 +45,15 @@ jobs:
           zstd -d *.tar.zst || { echo "zstd 解压失败"; exit 1; }
           echo "解压 tar 文件"
           tar -xvf *.tar || { echo "tar 解压失败"; exit 1; }
+          echo "列出当前目录内容"
           ls -l
-          cd openwrt-imagebuilder-* || { echo "进入 Image Builder 目录失败"; exit 1; }
+          echo "进入 Image Builder 目录"
+          IMAGE_BUILDER_DIR="openwrt-imagebuilder-${{ inputs.version }}-${{ inputs.target }}-${{ inputs.subtarget }}.Linux-x86_64"
+          echo "目标目录: $IMAGE_BUILDER_DIR"
+          cd "$IMAGE_BUILDER_DIR" || { echo "进入 Image Builder 目录失败，目录名可能不正确"; ls -l; exit 1; }
+
       - name: 下载第三方插件包
-        working-directory: ./openwrt-imagebuilder-*
+        working-directory: ./openwrt-imagebuilder-${{ inputs.version }}-${{ inputs.target }}-${{ inputs.subtarget }}.Linux-x86_64
         run: |
           mkdir -p packages
           cd packages
@@ -68,21 +75,24 @@ jobs:
           wget https://github.com/gdy666/luci-app-lucky/releases/download/v2.15.8/luci-app-lucky_2.15.8_all.ipk || { echo "luci-app-lucky 下载失败"; exit 1; }
           ls -l
           cd ..
+
       - name: 更新软件源并添加自定义源
-        working-directory: ./openwrt-imagebuilder-*
+        working-directory: ./openwrt-imagebuilder-${{ inputs.version }}-${{ inputs.target }}-${{ inputs.subtarget }}.Linux-x86_64
         run: |
           echo "src/gz openwrt_luci https://downloads.openwrt.org/releases/${{ inputs.version }}/packages/${{ inputs.target }}/luci" >> repositories.conf
           echo "src/gz custom_packages file://${PWD}/packages" >> repositories.conf
           cat repositories.conf
           make defconfig || { echo "make defconfig 失败"; exit 1; }
+
       - name: 构建自定义固件
-        working-directory: ./openwrt-imagebuilder-*
+        working-directory: ./openwrt-imagebuilder-${{ inputs.version }}-${{ inputs.target }}-${{ inputs.subtarget }}.Linux-x86_64
         run: |
           PACKAGES="luci luci-theme-argon luci-app-openclash luci-app-adguardhome luci-app-quickstart luci-app-dockerman luci-app-nikki luci-app-store luci-app-upnp luci-app-lucky adguardhome dnsmasq-full -dnsmasq"
           echo "开始构建固件，包列表: $PACKAGES"
           make image PROFILE="${{ inputs.profile }}" PACKAGES="$PACKAGES" FILES="../files/" EXTRA_IMAGE_NAME="自定义" ROOTFS_PARTSIZE="${{ inputs.rootfs_size }}" || { echo "构建固件失败"; exit 1; }
+
       - name: 上传固件
         uses: actions/upload-artifact@v4
         with:
           name: openwrt-固件
-          path: ./openwrt-imagebuilder-*/bin/targets/${{ inputs.target }}/${{ inputs.subtarget }}/*
+          path: ./openwrt-imagebuilder-${{ inputs.version }}-${{ inputs.target }}-${{ inputs.subtarget }}.Linux-x86_64/bin/targets/${{ inputs.target }}/${{ inputs.subtarget }}/*
