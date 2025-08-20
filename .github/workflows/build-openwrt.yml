@@ -20,9 +20,9 @@ on:
         required: true
         default: 'generic'
       rootfs_size:
-        description: '根文件系统分区大小 (MiB, 如 256)'
+        description: '根文件系统分区大小 (MiB, 如 1024)'
         required: true
-        default: '256'
+        default: '1024'
 
 jobs:
   build_job:
