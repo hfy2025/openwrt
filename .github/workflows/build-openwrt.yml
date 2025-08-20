@@ -30,54 +30,57 @@ jobs:
     steps:
       - name: 检出代码仓库
         uses: actions/checkout@v4
-
-      - name: 安装 zstd
-        run: sudo apt-get update && sudo apt-get install -y zstd
-
+      - name: 安装依赖工具
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y zstd build-essential libncurses5-dev gawk git gettext
       - name: 下载 OpenWrt 镜像构建工具
         run: |
           URL="https://downloads.openwrt.org/releases/${{ inputs.version }}/targets/${{ inputs.target }}/${{ inputs.subtarget }}/openwrt-imagebuilder-${{ inputs.version }}-${{ inputs.target }}-${{ inputs.subtarget }}.Linux-x86_64.tar.zst"
-          wget $URL || wget "http://mirror2.openwrt.org/releases/${{ inputs.version }}/targets/${{ inputs.target }}/${{ inputs.subtarget }}/openwrt-imagebuilder-${{ inputs.version }}-${{ inputs.target }}-${{ inputs.subtarget }}.Linux-x86_64.tar.zst"
-          zstd -d *.tar.zst
-          tar -xvf *.tar
-          cd openwrt-imagebuilder-*
-
+          echo "正在下载 Image Builder: $URL"
+          wget $URL || { echo "主服务器下载失败，尝试镜像服务器"; wget "http://mirror2.openwrt.org/releases/${{ inputs.version }}/targets/${{ inputs.target }}/${{ inputs.subtarget }}/openwrt-imagebuilder-${{ inputs.version }}-${{ inputs.target }}-${{ inputs.subtarget }}.Linux-x86_64.tar.zst" || { echo "镜像服务器也失败，请检查 URL 或网络"; exit 1; }; }
+          echo "解压 zst 文件"
+          zstd -d *.tar.zst || { echo "zstd 解压失败"; exit 1; }
+          echo "解压 tar 文件"
+          tar -xvf *.tar || { echo "tar 解压失败"; exit 1; }
+          ls -l
+          cd openwrt-imagebuilder-* || { echo "进入 Image Builder 目录失败"; exit 1; }
       - name: 下载第三方插件包
         working-directory: ./openwrt-imagebuilder-*
         run: |
           mkdir -p packages
           cd packages
-          # luci-app-openclash
-          wget https://dl.openwrt.ai/releases/24.10/packages/x86_64/kiddin9/luci-app-openclash_0.117.3-1_all.ipk
-          # luci-app-adguardhome
-          wget https://dl.openwrt.ai/releases/24.10/packages/x86_64/kiddin9/luci-app-adguardhome_1.6.5-2_all.ipk
-          # luci-app-quickstart
-          wget https://dl.openwrt.ai/releases/24.10/packages/x86_64/kiddin9/luci-app-quickstart_0.0.1-20240511_all.ipk
-          # luci-app-dockerman
-          wget https://dl.openwrt.ai/releases/24.10/packages/x86_64/kiddin9/luci-app-dockerman_1.2-20240511_all.ipk
-          # luci-app-nikki
-          wget https://dl.openwrt.ai/releases/24.10/packages/x86_64/kiddin9/luci-app-nikki_2.1.2-1_all.ipk
-          # luci-app-store
-          wget https://dl.openwrt.ai/releases/24.10/packages/x86_64/kiddin9/luci-app-store_0.2.5-1_all.ipk
-          # luci-app-upnp
-          wget https://dl.openwrt.ai/releases/24.10/packages/x86_64/kiddin9/luci-app-upnp_0.2.5-1_all.ipk
-          # luci-app-lucky
-          wget https://github.com/gdy666/luci-app-lucky/releases/download/v2.15.8/luci-app-lucky_2.15.8_all.ipk
+          echo "下载 luci-app-openclash"
+          wget https://dl.openwrt.ai/releases/24.10/packages/x86_64/kiddin9/luci-app-openclash_0.117.3-1_all.ipk || { echo "luci-app-openclash 下载失败"; exit 1; }
+          echo "下载 luci-app-adguardhome"
+          wget https://dl.openwrt.ai/releases/24.10/packages/x86_64/kiddin9/luci-app-adguardhome_1.6.5-2_all.ipk || { echo "luci-app-adguardhome 下载失败"; exit 1; }
+          echo "下载 luci-app-quickstart"
+          wget https://dl.openwrt.ai/releases/24.10/packages/x86_64/kiddin9/luci-app-quickstart_0.0.1-20240511_all.ipk || { echo "luci-app-quickstart 下载失败"; exit 1; }
+          echo "下载 luci-app-dockerman"
+          wget https://dl.openwrt.ai/releases/24.10/packages/x86_64/kiddin9/luci-app-dockerman_1.2-20240511_all.ipk || { echo "luci-app-dockerman 下载失败"; exit 1; }
+          echo "下载 luci-app-nikki"
+          wget https://dl.openwrt.ai/releases/24.10/packages/x86_64/kiddin9/luci-app-nikki_2.1.2-1_all.ipk || { echo "luci-app-nikki 下载失败"; exit 1; }
+          echo "下载 luci-app-store"
+          wget https://dl.openwrt.ai/releases/24.10/packages/x86_64/kiddin9/luci-app-store_0.2.5-1_all.ipk || { echo "luci-app-store 下载失败"; exit 1; }
+          echo "下载 luci-app-upnp"
+          wget https://dl.openwrt.ai/releases/24.10/packages/x86_64/kiddin9/luci-app-upnp_0.2.5-1_all.ipk || { echo "luci-app-upnp 下载失败"; exit 1; }
+          echo "下载 luci-app-lucky"
+          wget https://github.com/gdy666/luci-app-lucky/releases/download/v2.15.8/luci-app-lucky_2.15.8_all.ipk || { echo "luci-app-lucky 下载失败"; exit 1; }
+          ls -l
           cd ..
-
       - name: 更新软件源并添加自定义源
         working-directory: ./openwrt-imagebuilder-*
         run: |
           echo "src/gz openwrt_luci https://downloads.openwrt.org/releases/${{ inputs.version }}/packages/${{ inputs.target }}/luci" >> repositories.conf
           echo "src/gz custom_packages file://${PWD}/packages" >> repositories.conf
-          make defconfig
-
+          cat repositories.conf
+          make defconfig || { echo "make defconfig 失败"; exit 1; }
       - name: 构建自定义固件
         working-directory: ./openwrt-imagebuilder-*
         run: |
           PACKAGES="luci luci-theme-argon luci-app-openclash luci-app-adguardhome luci-app-quickstart luci-app-dockerman luci-app-nikki luci-app-store luci-app-upnp luci-app-lucky adguardhome dnsmasq-full -dnsmasq"
-          make image PROFILE="${{ inputs.profile }}" PACKAGES="$PACKAGES" FILES="../files/" EXTRA_IMAGE_NAME="自定义" ROOTFS_PARTSIZE="${{ inputs.rootfs_size }}"
-
+          echo "开始构建固件，包列表: $PACKAGES"
+          make image PROFILE="${{ inputs.profile }}" PACKAGES="$PACKAGES" FILES="../files/" EXTRA_IMAGE_NAME="自定义" ROOTFS_PARTSIZE="${{ inputs.rootfs_size }}" || { echo "构建固件失败"; exit 1; }
       - name: 上传固件
         uses: actions/upload-artifact@v4
         with:
