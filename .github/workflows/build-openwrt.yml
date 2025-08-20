@@ -25,7 +25,7 @@ on:
         default: '256'
 
 jobs:
-  构建任务:
+  build_job:
     runs-on: ubuntu-latest
     steps:
       - name: 检出代码仓库
