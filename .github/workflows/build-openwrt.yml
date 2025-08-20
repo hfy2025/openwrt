@@ -1,3 +1,4 @@
+```yaml
 name: 构建 OpenWrt 固件
 
 on:
@@ -20,9 +21,9 @@ on:
         required: true
         default: 'generic'
       rootfs_size:
-        description: '根文件系统分区大小 (MiB, 如 256)'
+        description: '根文件系统分区大小 (MiB, 如 1024)'
         required: true
-        default: '256'
+        default: '1024'
 
 jobs:
   build_job:
@@ -34,7 +35,13 @@ jobs:
       - name: 安装依赖工具
         run: |
           sudo apt-get update
-          sudo apt-get install -y zstd build-essential libncurses5-dev gawk git gettext
+          sudo apt-get install -y zstd build-essential libncurses5-dev gawk git gettext jq
+
+      - name: 获取最新 OpenClash 版本
+        run: |
+          LATEST_OPENCLASH=$(curl -s https://api.github.com/repos/vernesong/OpenClash/releases/latest | jq -r '.tag_name')
+          echo "最新 OpenClash 版本: $LATEST_OPENCLASH"
+          echo "OPENCLASH_VERSION=$LATEST_OPENCLASH" >> $GITHUB_ENV
 
       - name: 下载 OpenWrt 镜像构建工具
         run: |
@@ -57,10 +64,16 @@ jobs:
         run: |
           mkdir -p packages
           cd packages
-          echo "下载 luci-app-openclash"
-          wget https://dl.openwrt.ai/releases/24.10/packages/x86_64/kiddin9/luci-app-openclash_0.117.3-1_all.ipk || { echo "luci-app-openclash 下载失败"; exit 1; }
+          # OpenClash: 动态获取最新版本
+          echo "下载 luci-app-openclash (版本 ${{ env.OPENCLASH_VERSION }})"
+          wget https://github.com/vernesong/OpenClash/releases/download/${{ env.OPENCLASH_VERSION }}/luci-app-openclash_${{ env.OPENCLASH_VERSION }}_all.ipk || { echo "luci-app-openclash 下载失败"; exit 1; }
+          echo "下载 clash 核心 (版本 ${{ env.OPENCLASH_VERSION }}, x86_64)"
+          wget https://github.com/vernesong/OpenClash/releases/download/${{ env.OPENCLASH_VERSION }}/clash_${{ env.OPENCLASH_VERSION }}_x86_64.ipk || { echo "clash 核心下载失败"; exit 1; }
+          # 其他插件: 检查 https://dl.openwrt.ai/releases/24.10/packages/x86_64/kiddin9/ 获取最新版本
           echo "下载 luci-app-adguardhome"
           wget https://dl.openwrt.ai/releases/24.10/packages/x86_64/kiddin9/luci-app-adguardhome_1.6.5-2_all.ipk || { echo "luci-app-adguardhome 下载失败"; exit 1; }
+          echo "下载 adguardhome 核心"
+          wget https://dl.openwrt.ai/releases/24.10/packages/x86_64/kiddin9/adguardhome_0.107.51-1_x86_64.ipk || { echo "adguardhome 核心下载失败"; exit 1; }
           echo "下载 luci-app-quickstart"
           wget https://dl.openwrt.ai/releases/24.10/packages/x86_64/kiddin9/luci-app-quickstart_0.0.1-20240511_all.ipk || { echo "luci-app-quickstart 下载失败"; exit 1; }
           echo "下载 luci-app-dockerman"
@@ -71,6 +84,7 @@ jobs:
           wget https://dl.openwrt.ai/releases/24.10/packages/x86_64/kiddin9/luci-app-store_0.2.5-1_all.ipk || { echo "luci-app-store 下载失败"; exit 1; }
           echo "下载 luci-app-upnp"
           wget https://dl.openwrt.ai/releases/24.10/packages/x86_64/kiddin9/luci-app-upnp_0.2.5-1_all.ipk || { echo "luci-app-upnp 下载失败"; exit 1; }
+          # Lucky: 检查 https://github.com/gdy666/luci-app-lucky/releases 获取最新版本
           echo "下载 luci-app-lucky"
           wget https://github.com/gdy666/luci-app-lucky/releases/download/v2.15.8/luci-app-lucky_2.15.8_all.ipk || { echo "luci-app-lucky 下载失败"; exit 1; }
           ls -l
@@ -87,7 +101,7 @@ jobs:
       - name: 构建自定义固件
         working-directory: ./openwrt-imagebuilder-${{ inputs.version }}-${{ inputs.target }}-${{ inputs.subtarget }}.Linux-x86_64
         run: |
-          PACKAGES="luci luci-theme-argon luci-app-openclash luci-app-adguardhome luci-app-quickstart luci-app-dockerman luci-app-nikki luci-app-store luci-app-upnp luci-app-lucky adguardhome dnsmasq-full -dnsmasq"
+          PACKAGES="luci luci-theme-argon luci-app-openclash clash luci-app-adguardhome adguardhome luci-app-quickstart luci-app-dockerman luci-app-nikki luci-app-store luci-app-upnp luci-app-lucky luci-compat luci-ssl kmod-tun dnsmasq-full bash curl ca-bundle ipset ip-full iptables iptables-mod-tproxy iptables-mod-extra ruby ruby-yaml kmod-inet-diag unzip"
           echo "开始构建固件，包列表: $PACKAGES"
           make image PROFILE="${{ inputs.profile }}" PACKAGES="$PACKAGES" FILES="../files/" EXTRA_IMAGE_NAME="自定义" ROOTFS_PARTSIZE="${{ inputs.rootfs_size }}" || { echo "构建固件失败"; exit 1; }
 
@@ -96,3 +110,4 @@ jobs:
         with:
           name: openwrt-固件
           path: ./openwrt-imagebuilder-${{ inputs.version }}-${{ inputs.target }}-${{ inputs.subtarget }}.Linux-x86_64/bin/targets/${{ inputs.target }}/${{ inputs.subtarget }}/*
+```
