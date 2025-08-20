@@ -58,21 +58,21 @@ jobs:
           mkdir -p packages
           cd packages
           echo "下载 luci-app-openclash"
-          wget https://dl.openwrt.ai/releases/24.10/packages/x86_64/kiddin9/luci-app-openclash_0.117.3-1_all.ipk || { echo "luci-app-openclash 下载失败"; exit 1; }
+          wget https://dl.openwrt.ai/releases/24.10/packages/x86_64/kiddin9/luci-app-openclash_0.46.137-r24_all.ipk || { echo "luci-app-openclash 下载失败"; exit 1; }
           echo "下载 luci-app-adguardhome"
-          wget https://dl.openwrt.ai/releases/24.10/packages/x86_64/kiddin9/luci-app-adguardhome_1.6.5-2_all.ipk || { echo "luci-app-adguardhome 下载失败"; exit 1; }
+          wget https://dl.openwrt.ai/releases/24.10/packages/x86_64/kiddin9/luci-app-adguardhome_26.108.56344~be2cecb_all.ipk || { echo "luci-app-adguardhome 下载失败"; exit 1; }
           echo "下载 luci-app-quickstart"
-          wget https://dl.openwrt.ai/releases/24.10/packages/x86_64/kiddin9/luci-app-quickstart_0.0.1-20240511_all.ipk || { echo "luci-app-quickstart 下载失败"; exit 1; }
+          wget https://dl.openwrt.ai/releases/24.10/packages/x86_64/kiddin9/luci-app-quickstart_0.11.2-r1-r13_all.ipk || { echo "luci-app-quickstart 下载失败"; exit 1; }
           echo "下载 luci-app-dockerman"
-          wget https://dl.openwrt.ai/releases/24.10/packages/x86_64/kiddin9/luci-app-dockerman_1.2-20240511_all.ipk || { echo "luci-app-dockerman 下载失败"; exit 1; }
+          wget https://dl.openwrt.ai/releases/24.10/packages/x86_64/kiddin9/lluci-app-dockerman_0.5.26-r17_all.ipk || { echo "luci-app-dockerman 下载失败"; exit 1; }
           echo "下载 luci-app-nikki"
-          wget https://dl.openwrt.ai/releases/24.10/packages/x86_64/kiddin9/luci-app-nikki_2.1.2-1_all.ipk || { echo "luci-app-nikki 下载失败"; exit 1; }
+          wget https://dl.openwrt.ai/releases/24.10/packages/x86_64/kiddin9/luci-app-nikki_1.24.0-r30_all.ipk || { echo "luci-app-nikki 下载失败"; exit 1; }
           echo "下载 luci-app-store"
-          wget https://dl.openwrt.ai/releases/24.10/packages/x86_64/kiddin9/luci-app-store_0.2.5-1_all.ipk || { echo "luci-app-store 下载失败"; exit 1; }
+          wget https://dl.openwrt.ai/releases/24.10/packages/x86_64/kiddin9/luci-app-store_0.1.29-5-r17_all.ipk || { echo "luci-app-store 下载失败"; exit 1; }
           echo "下载 luci-app-upnp"
-          wget https://dl.openwrt.ai/releases/24.10/packages/x86_64/kiddin9/luci-app-upnp_0.2.5-1_all.ipk || { echo "luci-app-upnp 下载失败"; exit 1; }
+          wget https://dl.openwrt.ai/releases/24.10/packages/x86_64/kiddin9/luci-app-upnp_26.226.56266~60d407c_all.ipk || { echo "luci-app-upnp 下载失败"; exit 1; }
           echo "下载 luci-app-lucky"
-          wget https://github.com/gdy666/luci-app-lucky/releases/download/v2.15.8/luci-app-lucky_2.15.8_all.ipk || { echo "luci-app-lucky 下载失败"; exit 1; }
+          wget https://github.com/sirpdboy/luci-app-lucky/releases/download/v2.15.10/lucky_2.15.10-r1_x86_64.ipk || { echo "luci-app-lucky 下载失败"; exit 1; }
           ls -l
           cd ..
 
