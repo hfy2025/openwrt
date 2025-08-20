@@ -64,7 +64,7 @@ jobs:
           echo "下载 luci-app-quickstart"
           wget https://dl.openwrt.ai/releases/24.10/packages/x86_64/kiddin9/luci-app-quickstart_0.11.2-r1-r13_all.ipk || { echo "luci-app-quickstart 下载失败"; exit 1; }
           echo "下载 luci-app-dockerman"
-          wget https://dl.openwrt.ai/releases/24.10/packages/x86_64/kiddin9/lluci-app-dockerman_0.5.26-r17_all.ipk || { echo "luci-app-dockerman 下载失败"; exit 1; }
+          wget https://dl.openwrt.ai/releases/24.10/packages/x86_64/kiddin9/luci-app-dockerman_0.5.26-r17_all.ipk || { echo "luci-app-dockerman 下载失败"; exit 1; }
           echo "下载 luci-app-nikki"
           wget https://dl.openwrt.ai/releases/24.10/packages/x86_64/kiddin9/luci-app-nikki_1.24.0-r30_all.ipk || { echo "luci-app-nikki 下载失败"; exit 1; }
           echo "下载 luci-app-store"
