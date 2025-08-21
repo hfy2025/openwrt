@@ -1,3 +1,4 @@
+# yaml-language-server: $schema=https://json.schemastore.org/github-workflow.json
 name: 构建 OpenWrt 固件
 
 on:
@@ -40,7 +41,7 @@ jobs:
         run: |
           URL="https://downloads.openwrt.org/releases/${{ inputs.version }}/targets/${{ inputs.target }}/${{ inputs.subtarget }}/openwrt-imagebuilder-${{ inputs.version }}-${{ inputs.target }}-${{ inputs.subtarget }}.Linux-x86_64.tar.zst"
           echo "正在下载 Image Builder: $URL"
-          wget $URL || { echo "主服务器下载失败，尝试镜像服务器"; wget "http://mirror2.openwrt.org/releases/${{ inputs.version }}/targets/${{ inputs.target }}/${{ inputs.subtarget }}/openwrt-imagebuilder-${{ inputs.version }}-${{ inputs.target }}-${{ inputs.subtarget }}.Linux-x86_64.tar.zst" || { echo "镜像服务器也失败，请检查 URL 或网络"; exit 1; }; }
+          wget "$URL" || { echo "主服务器下载失败，尝试镜像服务器"; wget "http://mirror2.openwrt.org/releases/${{ inputs.version }}/targets/${{ inputs.target }}/${{ inputs.subtarget }}/openwrt-imagebuilder-${{ inputs.version }}-${{ inputs.target }}-${{ inputs.subtarget }}.Linux-x86_64.tar.zst" || { echo "镜像服务器也失败，请检查 URL 或网络"; exit 1; }; }
           echo "解压 zst 文件"
           zstd -d *.tar.zst || { echo "zstd 解压失败"; exit 1; }
           echo "解压 tar 文件"
