@@ -8,13 +8,13 @@ on:
         required: true
         default: '24.10.2'
       target:
-        description: '目标架构 (x86)'
+        description: '目标架构 (x86_64)'
         required: true
-        default: 'x86'
+        default: 'x86_64'
       subtarget:
-        description: '子目标 (64)'
+        description: '子目标 (generic)'
         required: true
-        default: '64'
+        default: 'generic'
       profile:
         description: '设备配置文件 (generic)'
         required: true
@@ -34,7 +34,7 @@ jobs:
       - name: 安装依赖工具
         run: |
           sudo apt-get update
-          sudo apt-get install -y zstd build-essential libncurses5-dev gawk git gettext
+          sudo apt-get install -y zstd build-essential libncurses5-dev libncursesw5-dev zlib1g-dev gawk git gettext libssl-dev xsltproc wget unzip python3
 
       - name: 下载 OpenWrt 镜像构建工具
         run: |
@@ -51,6 +51,12 @@ jobs:
           IMAGE_BUILDER_DIR="openwrt-imagebuilder-${{ inputs.version }}-${{ inputs.target }}-${{ inputs.subtarget }}.Linux-x86_64"
           echo "目标目录: $IMAGE_BUILDER_DIR"
           cd "$IMAGE_BUILDER_DIR" || { echo "进入 Image Builder 目录失败，目录名可能不正确"; ls -l; exit 1; }
+          # 验证 Makefile 存在
+          if [ ! -f "Makefile" ]; then
+            echo "错误：Makefile 未找到，目录: ${PWD}"
+            ls -l
+            exit 1
+          fi
 
       - name: 下载第三方插件包
         working-directory: ./openwrt-imagebuilder-${{ inputs.version }}-${{ inputs.target }}-${{ inputs.subtarget }}.Linux-x86_64
@@ -79,9 +85,34 @@ jobs:
       - name: 更新软件源并添加自定义源
         working-directory: ./openwrt-imagebuilder-${{ inputs.version }}-${{ inputs.target }}-${{ inputs.subtarget }}.Linux-x86_64
         run: |
-          echo "src/gz openwrt_luci https://downloads.openwrt.org/releases/${{ inputs.version }}/packages/x86_64/luci" >> repositories.conf
+          # 检查工作目录是否存在
+          if [ ! -d "${PWD}" ]; then
+            echo "错误：工作目录 ${PWD} 不存在"
+            exit 1
+          fi
+          # 确保 repositories.conf 存在
+          touch repositories.conf
+          # 避免重复添加 openwrt_luci 条目
+          if ! grep -Fx "src/gz openwrt_luci https://downloads.openwrt.org/releases/${{ inputs.version }}/packages/${{ inputs.target }}/luci" repositories.conf; then
+            echo "src/gz openwrt_luci https://downloads.openwrt.org/releases/${{ inputs.version }}/packages/${{ inputs.target }}/luci" >> repositories.conf
+          fi
+          # 添加自定义软件源
           echo "src/gz custom_packages file://${PWD}/packages" >> repositories.conf
+          # 修正架构路径（将 x86/64 替换为 x86_64）
+          sed -i 's|targets/x86/64|targets/x86_64|g' repositories.conf
+          # 显示 repositories.conf 内容以便调试
           cat repositories.conf
+          # 验证 Makefile 存在
+          if [ ! -f "Makefile" ]; then
+            echo "错误：Makefile 未找到，目录: ${PWD}"
+            ls -l
+            exit 1
+          fi
+          # 显示调试信息
+          pwd
+          ls -la
+          make -v
+          # 执行 make defconfig
           make defconfig || { echo "make defconfig 失败"; exit 1; }
 
       - name: 构建自定义固件
@@ -96,3 +127,4 @@ jobs:
         with:
           name: openwrt-固件
           path: ./openwrt-imagebuilder-${{ inputs.version }}-${{ inputs.target }}-${{ inputs.subtarget }}.Linux-x86_64/bin/targets/${{ inputs.target }}/${{ inputs.subtarget }}/*
+```
