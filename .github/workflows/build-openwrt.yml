@@ -98,7 +98,7 @@ jobs:
           STORE_URL="https://dl.openwrt.ai/releases/24.10/packages/x86_64/kiddin9/luci-app-store_0.1.29-5-r17_all.ipk"
           wget "$STORE_URL" || { echo "luci-app-store 下载失败"; exit 1; }
           echo "下载 luci-app-upnp"
-          UPNP_URL="https://dl.openwrt.ai/releases/24.10/packages/x86_64/kiddin9/luci-app-upnp_26.226.56266~60d407c_all.ipk"
+          UPNP_URL="https://dl.openwrt.ai/releases/24.10/packages/x86_64/kiddin9/luci-app-upnp_26.226.56266-60d407c_all.ipk"
           wget "$UPNP_URL" || { echo "luci-app-upnp 下载失败"; exit 1; }
           echo "下载 luci-app-lucky"
           LUCKY_URL="https://github.com/sirpdboy/luci-app-lucky/releases/download/v2.15.10/lucky_2.15.10-r1_x86_64.ipk"
