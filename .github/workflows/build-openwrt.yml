@@ -1,3 +1,4 @@
+# yaml-language-server: $schema=https://json.schemastore.org/github-workflow.json
 name: 构建 OpenWrt 固件
 
 on:
@@ -8,13 +9,13 @@ on:
         required: true
         default: '24.10.2'
       target:
-        description: '目标架构 (x86_64)'
+        description: '目标架构 (x86)'
         required: true
-        default: 'x86_64'
+        default: 'x86'
       subtarget:
-        description: '子目标 (generic)'
+        description: '子目标 (64)'
         required: true
-        default: 'generic'
+        default: '64'
       profile:
         description: '设备配置文件 (generic)'
         required: true
@@ -40,7 +41,22 @@ jobs:
         run: |
           URL="https://downloads.openwrt.org/releases/${{ inputs.version }}/targets/${{ inputs.target }}/${{ inputs.subtarget }}/openwrt-imagebuilder-${{ inputs.version }}-${{ inputs.target }}-${{ inputs.subtarget }}.Linux-x86_64.tar.zst"
           echo "正在下载 Image Builder: $URL"
-          wget "$URL" || { echo "主服务器下载失败，尝试镜像服务器"; wget "http://mirror2.openwrt.org/releases/${{ inputs.version }}/targets/${{ inputs.target }}/${{ inputs.subtarget }}/openwrt-imagebuilder-${{ inputs.version }}-${{ inputs.target }}-${{ inputs.subtarget }}.Linux-x86_64.tar.zst" || { echo "镜像服务器也失败，请检查 URL 或网络"; exit 1; }; }
+          # 验证 URL 是否有效
+          curl -sIL "$URL" | grep -E "HTTP/[0-9.]+ 200" || {
+            echo "主服务器 URL 不可用，尝试镜像服务器"
+            URL="https://mirrors.tuna.tsinghua.edu.cn/openwrt/releases/${{ inputs.version }}/targets/${{ inputs.target }}/${{ inputs.subtarget }}/openwrt-imagebuilder-${{ inputs.version }}-${{ inputs.target }}-${{ inputs.subtarget }}.Linux-x86_64.tar.zst"
+            echo "镜像服务器 URL: $URL"
+            curl -sIL "$URL" | grep -E "HTTP/[0-9.]+ 200" || {
+              echo "清华大学镜像服务器也失败，尝试 mirror2.openwrt.org"
+              URL="http://mirror2.openwrt.org/releases/${{ inputs.version }}/targets/${{ inputs.target }}/${{ inputs.subtarget }}/openwrt-imagebuilder-${{ inputs.version }}-${{ inputs.target }}-${{ inputs.subtarget }}.Linux-x86_64.tar.zst"
+              echo "备用镜像服务器 URL: $URL"
+              curl -sIL "$URL" | grep -E "HTTP/[0-9.]+ 200" || {
+                echo "所有服务器均失败，请检查版本 (${{ inputs.version }}) 或网络"
+                exit 1
+              }
+            }
+          }
+          wget "$URL" || { echo "下载失败，请检查 URL 或网络"; exit 1; }
           echo "解压 zst 文件"
           zstd -d *.tar.zst || { echo "zstd 解压失败"; exit 1; }
           echo "解压 tar 文件"
@@ -88,6 +104,7 @@ jobs:
           # 将 GitHub Actions 输入参数存储到 shell 变量
           VERSION="${{ inputs.version }}"
           TARGET="${{ inputs.target }}"
+          SUBTARGET="${{ inputs.subtarget }}"
           # 检查工作目录是否存在
           if [ ! -d "${PWD}" ]; then
             echo "错误：工作目录 ${PWD} 不存在"
@@ -96,14 +113,14 @@ jobs:
           # 确保 repositories.conf 存在
           touch repositories.conf
           # 避免重复添加 openwrt_luci 条目
-          LUCI_REPO="src/gz openwrt_luci https://downloads.openwrt.org/releases/${VERSION}/packages/${TARGET}/luci"
+          LUCI_REPO="src/gz openwrt_luci https://downloads.openwrt.org/releases/${VERSION}/packages/${TARGET}_${SUBTARGET}/luci"
           if ! grep -Fx "${LUCI_REPO}" repositories.conf; then
             echo "${LUCI_REPO}" >> repositories.conf
           fi
           # 添加自定义软件源
           echo "src/gz custom_packages file://${PWD}/packages" >> repositories.conf
           # 修正架构路径（将 x86/64 替换为 x86_64）
-          sed -i 's|targets/x86/64|targets/x86_64|g' repositories.conf
+          sed -i 's|x86/64|x86_64|g' repositories.conf
           # 显示 repositories.conf 内容以便调试
           cat repositories.conf
           # 验证 Makefile 存在
@@ -131,3 +148,4 @@ jobs:
         with:
           name: openwrt-固件
           path: ./openwrt-imagebuilder-${{ inputs.version }}-${{ inputs.target }}-${{ inputs.subtarget }}.Linux-x86_64/bin/targets/${{ inputs.target }}/${{ inputs.subtarget }}/*
+```
