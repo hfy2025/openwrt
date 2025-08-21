@@ -79,7 +79,7 @@ jobs:
       - name: 更新软件源并添加自定义源
         working-directory: ./openwrt-imagebuilder-${{ inputs.version }}-${{ inputs.target }}-${{ inputs.subtarget }}.Linux-x86_64
         run: |
-          echo "src/gz openwrt_luci https://downloads.openwrt.org/releases/${{ inputs.version }}/packages/${{ inputs.target }}/luci" >> repositories.conf
+          echo "src/gz openwrt_luci https://downloads.openwrt.org/releases/${{ inputs.version }}/packages/x86_64/luci" >> repositories.conf
           echo "src/gz custom_packages file://${PWD}/packages" >> repositories.conf
           cat repositories.conf
           make defconfig || { echo "make defconfig 失败"; exit 1; }
