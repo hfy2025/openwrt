@@ -1,4 +1,3 @@
-# yaml-language-server: $schema=https://json.schemastore.org/github-workflow.json
 name: 构建 OpenWrt 固件
 
 on:
@@ -132,4 +131,3 @@ jobs:
         with:
           name: openwrt-固件
           path: ./openwrt-imagebuilder-${{ inputs.version }}-${{ inputs.target }}-${{ inputs.subtarget }}.Linux-x86_64/bin/targets/${{ inputs.target }}/${{ inputs.subtarget }}/*
-```
