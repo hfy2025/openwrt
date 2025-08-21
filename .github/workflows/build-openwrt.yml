@@ -1,3 +1,4 @@
+```yaml
 # yaml-language-server: $schema=https://json.schemastore.org/github-workflow.json
 name: 构建 OpenWrt 固件
 
@@ -79,22 +80,31 @@ jobs:
         run: |
           mkdir -p packages
           cd packages
+          # 定义并下载插件包
           echo "下载 luci-app-openclash"
-          wget https://dl.openwrt.ai/releases/24.10/packages/x86_64/kiddin9/luci-app-openclash_0.46.137-r24_all.ipk || { echo "luci-app-openclash 下载失败"; exit 1; }
+          OPENCLASH_URL="https://dl.openwrt.ai/releases/24.10/packages/x86_64/kiddin9/luci-app-openclash_0.46.137-r24_all.ipk"
+          wget "$OPENCLASH_URL" || { echo "luci-app-openclash 下载失败"; exit 1; }
           echo "下载 luci-app-adguardhome"
-          wget https://dl.openwrt.ai/releases/24.10/packages/x86_64/kiddin9/luci-app-adguardhome_26.108.56344~be2cecb_all.ipk || { echo "luci-app-adguardhome 下载失败"; exit 1; }
+          ADGUARD_URL="https://dl.openwrt.ai/releases/24.10/packages/x86_64/kiddin9/luci-app-adguardhome_26.108.56344~be2cecb_all.ipk"
+          wget "$ADGUARD_URL" || { echo "luci-app-adguardhome 下载失败"; exit 1; }
           echo "下载 luci-app-quickstart"
-          wget https://dl.openwrt.ai/releases/24.10/packages/x86_64/kiddin9/luci-app-quickstart_0.11.2-r1-r13_all.ipk || { echo "luci-app-quickstart 下载失败"; exit 1; }
+          QUICKSTART_URL="https://dl.openwrt.ai/releases/24.10/packages/x86_64/kiddin9/luci-app-quickstart_0.11.2-r1-r13_all.ipk"
+          wget "$QUICKSTART_URL" || { echo "luci-app-quickstart 下载失败"; exit 1; }
           echo "下载 luci-app-dockerman"
-          wget https://dl.openwrt.ai/releases/24.10/packages/x86_64/kiddin9/luci-app-dockerman_0.5.26-r17_all.ipk || { echo "luci-app-dockerman 下载失败"; exit 1; }
+          DOCKERMAN_URL="https://dl.openwrt.ai/releases/24.10/packages/x86_64/kiddin9/luci-app-dockerman_0.5.26-r17_all.ipk"
+          wget "$DOCKERMAN_URL" || { echo "luci-app-dockerman 下载失败"; exit 1; }
           echo "下载 luci-app-nikki"
-          wget https://dl.openwrt.ai/releases/24.10/packages/x86_64/kiddin9/luci-app-nikki_1.24.0-r30_all.ipk || { echo "luci-app-nikki 下载失败"; exit 1; }
+          NIKKI_URL="https://dl.openwrt.ai/releases/24.10/packages/x86_64/kiddin9/luci-app-nikki_1.24.0-r30_all.ipk"
+          wget "$NIKKI_URL" || { echo "luci-app-nikki 下载失败"; exit 1; }
           echo "下载 luci-app-store"
-          wget https://dl.openwrt.ai/releases/24.10/packages/x86_64/kiddin9/luci-app-store_0.1.29-5-r17_all.ipk || { echo "luci-app-store 下载失败"; exit 1; }
+          STORE_URL="https://dl.openwrt.ai/releases/24.10/packages/x86_64/kiddin9/luci-app-store_0.1.29-5-r17_all.ipk"
+          wget "$STORE_URL" || { echo "luci-app-store 下载失败"; exit 1; }
           echo "下载 luci-app-upnp"
-          wget https://dl.openwrt.ai/releases/24.10/packages/x86_64/kiddin9/luci-app-upnp_26.226.56266~60d407c_all.ipk || { echo "luci-app-upnp 下载失败"; exit 1; }
+          UPNP_URL="https://dl.openwrt.ai/releases/24.10/packages/x86_64/kiddin9/luci-app-upnp_26.226.56266~60d407c_all.ipk"
+          wget "$UPNP_URL" || { echo "luci-app-upnp 下载失败"; exit 1; }
           echo "下载 luci-app-lucky"
-          wget https://github.com/sirpdboy/luci-app-lucky/releases/download/v2.15.10/lucky_2.15.10-r1_x86_64.ipk || { echo "luci-app-lucky 下载失败"; exit 1; }
+          LUCKY_URL="https://github.com/sirpdboy/luci-app-lucky/releases/download/v2.15.10/lucky_2.15.10-r1_x86_64.ipk"
+          wget "$LUCKY_URL" || { echo "luci-app-lucky 下载失败"; exit 1; }
           ls -l
           cd ..
 
