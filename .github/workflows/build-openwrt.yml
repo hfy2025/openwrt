@@ -100,7 +100,7 @@ jobs:
           # 添加自定义软件源
           echo "src/gz custom_packages file://${PWD}/packages" >> repositories.conf
           # 修正架构路径（将 x86/64 替换为 x86_64）
-          sed -i 's|targets/x86/64|targets/x86_64|g' repositories.conf
+          sed -i 's|targets\/x86\/64|targets\/x86_64|g' repositories.conf
           # 显示 repositories.conf 内容以便调试
           cat repositories.conf
           # 验证 Makefile 存在
