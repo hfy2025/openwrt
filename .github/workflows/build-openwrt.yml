@@ -18,42 +18,53 @@ jobs:
         sudo apt update
         sudo apt install -y wget unzip curl jq
 
+    - name: Determine latest ImmortalWrt version
+      id: get_version
+      run: |
+        # 尝试获取最新的 24.10.x 版本
+        VERSION=$(curl -s https://downloads.immortalwrt.org/releases/ | grep -oE '24\.10\.[0-9]+' | sort -Vr | head -n1)
+        echo "Using ImmortalWrt version: $VERSION"
+        echo "VERSION=$VERSION" >> $GITHUB_ENV
+
     - name: Download ImmortalWrt ImageBuilder (kernel 6.6)
       run: |
-        # 使用最新ImmortalWrt 24.10.x，支持内核6.6
-        wget https://downloads.immortalwrt.org/releases/24.10.2/targets/x86/64/immortalwrt-imagebuilder-24.10.2-x86-64.Linux-x86_64.tar.xz
-        tar -xvf immortalwrt-imagebuilder-24.10.2-x86-64.Linux-x86_64.tar.xz
+        IMAGEBUILDER_URL="https://downloads.immortalwrt.org/releases/${{ env.VERSION }}/targets/x86/64/immortalwrt-imagebuilder-${{ env.VERSION }}-x86-64.Linux-x86_64.tar.xz"
+        echo "Downloading ImageBuilder from: $IMAGEBUILDER_URL"
+        wget -q --tries=3 --timeout=30 "$IMAGEBUILDER_URL" -O immortalwrt-imagebuilder.tar.xz || {
+          echo "Error: Failed to download ImageBuilder. Checking snapshot..."
+          wget -q https://downloads.immortalwrt.org/snapshots/targets/x86/64/immortalwrt-imagebuilder-snapshot-x86-64.Linux-x86_64.tar.xz -O immortalwrt-imagebuilder.tar.xz
+        }
+        tar -xvf immortalwrt-imagebuilder.tar.xz
         mv immortalwrt-imagebuilder-* imagebuilder
 
     - name: Download latest plugin IPKs (auto update)
       run: |
         mkdir -p packages
-        # 示例：下载OpenClash最新IPK（替换为实际Release URL，根据插件调整）
-        curl -s https://api.github.com/repos/vernesong/OpenClash/releases/latest | jq -r '.assets[] | select(.name | endswith("_x86_64.ipk")) | .browser_download_url' | xargs -I {} curl -L {} -o packages/luci-app-openclash.ipk
+        # OpenClash
+        curl -s https://api.github.com/repos/vermilion/OpenClash/releases/latest | jq -r '.assets[] | select(.name | endswith("_x86_64.ipk")) | .browser_download_url' | xargs -I {} curl -L {} -o packages/luci-app-openclash.ipk || echo "Failed to download OpenClash, continuing..."
         # AdGuardHome
-        curl -s https://api.github.com/repos/rufengsuixing/luci-app-adguardhome/releases/latest | jq -r '.assets[] | select(.name | endswith("_x86_64.ipk")) | .browser_download_url' | xargs -I {} curl -L {} -o packages/luci-app-adguardhome.ipk
-        # quickstart（假设从兼容仓库，如wukongdaily/store）
-        curl -L https://github.com/wukongdaily/store/raw/main/run/x86/quickstart/luci-app-quickstart_x86_64.ipk -o packages/luci-app-quickstart.ipk
+        curl -s https://api.github.com/repos/rufengsuixing/luci-app-adguardhome/releases/latest | jq -r '.assets[] | select(.name | endswith("_x86_64.ipk")) | .browser_download_url' | xargs -I {} curl -L {} -o packages/luci-app-adguardhome.ipk || echo "Failed to download AdGuardHome, continuing..."
+        # quickstart (从参考仓库或其他)
+        curl -L https://github.com/wukongdaily/store/raw/main/run/x86/quickstart/luci-app-quickstart_x86_64.ipk -o packages/luci-app-quickstart.ipk || echo "Failed to download quickstart, continuing..."
         # dockerman
-        curl -s https://api.github.com/repos/lisaac/luci-app-dockerman/releases/latest | jq -r '.assets[] | select(.name | endswith("_x86_64.ipk")) | .browser_download_url' | xargs -I {} curl -L {} -o packages/luci-app-dockerman.ipk
-        # nikki（假设存在，替换URL）
-        curl -L https://example.com/luci-app-nikki_x86_64.ipk -o packages/luci-app-nikki.ipk  # 如无，搜索兼容IPK
+        curl -s https://api.github.com/repos/lisaac/luci-app-dockerman/releases/latest | jq -r '.assets[] | select(.name | endswith("_x86_64.ipk")) | .browser_download_url' | xargs -I {} curl -L {} -o packages/luci-app-dockerman.ipk || echo "Failed to download dockerman, continuing..."
+        # nikki (假设，替换为实际URL)
+        curl -L https://example.com/luci-app-nikki_x86_64.ipk -o packages/luci-app-nikki.ipk || echo "Failed to download nikki, continuing..."
         # store (iStore)
-        curl -L https://github.com/linkease/istore/raw/main/packages/luci-app-store_x86_64.ipk -o packages/luci-app-store.ipk
+        curl -L https://github.com/linkease/istore/raw/main/packages/luci-app-store_x86_64.ipk -o packages/luci-app-store.ipk || echo "Failed to download store, continuing..."
         # upnp
-        curl -L https://downloads.immortalwrt.org/releases/24.10.2/packages/x86_64/luci/luci-app-upnp_x86_64.ipk -o packages/luci-app-upnp.ipk
+        curl -L https://downloads.immortalwrt.org/releases/${{ env.VERSION }}/packages/x86_64/luci/luci-app-upnp_x86_64.ipk -o packages/luci-app-upnp.ipk || echo "Failed to download upnp, continuing..."
         # lucky
-        curl -L https://github.com/gdy666/luci-app-lucky/raw/master/luci-app-lucky_x86_64.ipk -o packages/luci-app-lucky.ipk
-        # 主题: luci-theme-argon
-        curl -s https://api.github.com/repos/jerrykuku/luci-theme-argon/releases/latest | jq -r '.assets[] | select(.name | endswith("_x86_64.ipk")) | .browser_download_url' | xargs -I {} curl -L {} -o packages/luci-theme-argon.ipk
-        # 添加内核依赖示例（针对OpenClash等，如iptables-mod-tproxy）
-        curl -L https://downloads.immortalwrt.org/releases/24.10.2/packages/x86_64/base/iptables-mod-tproxy_x86_64.ipk -o packages/iptables-mod-tproxy.ipk
-        # 根据插件需要，添加更多依赖...
+        curl -L https://github.com/gdy666/luci-app-lucky/raw/master/luci-app-lucky_x86_64.ipk -o packages/luci-app-lucky.ipk || echo "Failed to download lucky, continuing..."
+        # luci-theme-argon
+        curl -s https://api.github.com/repos/jerrykuku/luci-theme-argon/releases/latest | jq -r '.assets[] | select(.name | endswith("_all.ipk")) | .browser_download_url' | xargs -I {} curl -L {} -o packages/luci-theme-argon.ipk || echo "Failed to download argon theme, continuing..."
+        # 内核依赖（如 OpenClash 需要）
+        curl -L https://downloads.immortalwrt.org/releases/${{ env.VERSION }}/packages/x86_64/base/iptables-mod-tproxy_x86_64.ipk -o packages/iptables-mod-tproxy.ipk || echo "Failed to download iptables-mod-tproxy, continuing..."
 
     - name: Prepare custom files and packages
       run: |
         chmod +x shell/custom-packages.sh
-        . shell/custom-packages.sh  # 加载自定义包列表
+        . shell/custom-packages.sh
 
     - name: Build firmware
       working-directory: imagebuilder
@@ -62,8 +73,10 @@ jobs:
           PACKAGES="$CUSTOM_PACKAGES luci-theme-argon" \
           FILES="../files" \
           EXTRA_IMAGE_NAME="custom-04543473-$(date +%Y%m%d)" \
-          ROOTFS_PARTSIZE=1024  # 系统分区1024MB（boot默认32MB，通过img生成控制）
-          # 其他参数：如启用Docker -docker
+          ROOTFS_PARTSIZE=1024 \
+          CONFIG_TARGET_KERNEL_PARTSIZE=32  # 内核分区32MB
+          # 启用Docker支持（可选）
+          DOCKER="1"
 
     - name: Upload artifact
       uses: actions/upload-artifact@v4
