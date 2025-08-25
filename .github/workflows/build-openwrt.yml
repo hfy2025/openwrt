@@ -1,201 +1,72 @@
-name: 构建 OpenWrt 固件
+name: Build ImmortalWrt for x86_64
 
 on:
-  workflow_dispatch:
-    inputs:
-      version:
-        description: 'OpenWrt 版本号 (24.10.0)'
-        required: true
-        default: '24.10.0'
-      target:
-        description: '目标架构 (x86)'
-        required: true
-        default: 'x86'
-      subtarget:
-        description: '子目标 (64)'
-        required: true
-        default: '64'
-      profile:
-        description: '设备配置文件 (generic)'
-        required: true
-        default: 'generic'
-      rootfs_size:
-        description: '根文件系统分区大小 (MiB, 1024)'
-        required: true
-        default: '1024'
-      include_docker:
-        description: '是否包含 Docker 插件'
-        required: true
-        default: 'yes'
-        type: choice
-        options:
-          - 'yes'
-          - 'no'
-      enable_pppoe:
-        description: '是否配置 PPPoE 拨号信息'
-        required: true
-        default: 'no'
-        type: choice
-        options:
-          - 'yes'
-          - 'no'
-      pppoe_account:
-        description: '宽带账号 (若启用 PPPoE)'
-        required: false
-      pppoe_password:
-        description: '宽带密码 (若启用 PPPoE)'
-        required: false
+  workflow_dispatch:  # 手动触发构建
+  push:
+    branches: [main]
 
 jobs:
-  build_job:
-    runs-on: ubuntu-22.04
+  build:
+    runs-on: ubuntu-latest
+
     steps:
-      - name: 检出代码仓库
-        uses: actions/checkout@v4
+    - name: Checkout
+      uses: actions/checkout@v4
 
-      - name: 清理冲突包并安装 Docker
-        run: |
-          echo "检查现有包状态"
-          dpkg -l | grep -E 'docker|containerd|runc' || echo "无相关包"
-          echo "清理可能冲突的包"
-          sudo apt-get remove -y docker.io docker-doc docker-compose podman-docker containerd runc containerd.io || echo "未找到要移除的包"
-          sudo apt-get autoremove -y
-          sudo apt-get purge -y containerd containerd.io runc || echo "未找到要清除的包"
-          echo "检查被锁定的包"
-          apt-mark showhold
-          echo "添加 Docker 官方 GPG 密钥和仓库"
-          sudo apt-get update
-          sudo apt-get install -y ca-certificates curl
-          sudo install -m 0755 -d /etc/apt/keyrings
-          curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
-          sudo chmod a+r /etc/apt/keyrings/docker.gpg
-          echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
-          echo "再次更新软件源"
-          sudo apt-get update
-          echo "安装 docker.io"
-          sudo apt-get install -y docker.io
-          sudo systemctl start docker
-          echo "检查 Docker 版本"
-          docker --version
-          echo "拉取 Docker 镜像"
-          docker pull immortalwrt/imagebuilder:x86-64-openwrt-24.10.0 || { echo "拉取镜像失败"; exit 1; }
-          echo "检查可用镜像"
-          docker images | grep immortalwrt/imagebuilder
+    - name: Install dependencies
+      run: |
+        sudo apt update
+        sudo apt install -y wget unzip curl jq
 
-      - name: 创建构建脚本和 PPPoE 配置
-        run: |
-          mkdir -p x86-64/24.10
-          cat > x86-64/24.10/build.sh <<- 'EOF'
-          #!/bin/bash
-          set -e
-          echo "当前目录: $(pwd)"
-          echo "构建参数: PROFILE=$PROFILE, INCLUDE_DOCKER=$INCLUDE_DOCKER, ENABLE_PPPOE=$ENABLE_PPPOE"
-          echo "检查环境"
-          make --version
-          opkg --version || echo "opkg 未安装"
-          echo "检查可用配置文件"
-          make info
-          
-          # 配置软件源
-          echo "配置软件源"
-          echo "src/gz openwrt_core https://downloads.openwrt.org/releases/$OPENWRT_VERSION/targets/$TARGET/$SUBTARGET/packages" > repositories.conf
-          echo "src/gz openwrt_base https://downloads.openwrt.org/releases/$OPENWRT_VERSION/packages/x86_64/base" >> repositories.conf
-          echo "src/gz openwrt_luci https://downloads.openwrt.org/releases/$OPENWRT_VERSION/packages/x86_64/luci" >> repositories.conf
-          echo "src/gz openwrt_packages https://downloads.openwrt.org/releases/$OPENWRT_VERSION/packages/x86_64/packages" >> repositories.conf
-          echo "src/gz openwrt_routing https://downloads.openwrt.org/releases/$OPENWRT_VERSION/packages/x86_64/routing" >> repositories.conf
-          cat repositories.conf
-          
-          # 配置固件
-          PACKAGES="luci luci-theme-argon dnsmasq-full -dnsmasq"
-          if [ "$INCLUDE_DOCKER" = "yes" ]; then
-            PACKAGES="$PACKAGES luci-app-dockerman docker"
-          fi
-          if [ "$ENABLE_PPPOE" = "yes" ]; then
-            PACKAGES="$PACKAGES luci-app-pppoe-server ppp-mod-pppoe"
-            mkdir -p files/etc/uci-defaults
-            cp /home/build/openwrt/pppoe-config.sh files/etc/uci-defaults/99-custom.sh
-            echo "PPPoE 配置文件内容:"
-            cat files/etc/uci-defaults/99-custom.sh
-          fi
-          
-          # 更新软件源并构建固件
-          echo "开始构建固件，包列表: $PACKAGES"
-          make image PROFILE="$PROFILE" PACKAGES="$PACKAGES" EXTRA_IMAGE_NAME="custom" ROOTFS_PARTSIZE="$ROOTFS_PARTSIZE" FILES="files/" V=s || {
-            echo "make image 失败，输出目录结构"
-            ls -lR /home/build/openwrt
-            cat repositories.conf
-            exit 1
-          }
-          echo "固件构建完成，列出生成文件"
-          ls -l bin/targets/$TARGET/$SUBTARGET
-          EOF
-          chmod +x x86-64/24.10/build.sh
-          echo "构建脚本内容:"
-          cat x86-64/24.10/build.sh
-          
-          # 创建 PPPoE 配置文件（仅在需要时挂载）
-          if [ "${{ inputs.enable_pppoe }}" = "yes" ]; then
-            cat > x86-64/24.10/pppoe-config.sh <<- 'EOT'
-            #!/bin/sh
-            uci set network.wan.proto='pppoe'
-            uci set network.wan.username='$PPPOE_ACCOUNT'
-            uci set network.wan.password='$PPPOE_PASSWORD'
-            uci commit network
-            EOT
-            chmod +x x86-64/24.10/pppoe-config.sh
-            echo "PPPoE 配置文件内容:"
-            cat x86-64/24.10/pppoe-config.sh
-          fi
+    - name: Download ImmortalWrt ImageBuilder (kernel 6.6)
+      run: |
+        # 使用最新ImmortalWrt 24.10.x，支持内核6.6
+        wget https://downloads.immortalwrt.org/releases/24.10.2/targets/x86/64/immortalwrt-imagebuilder-24.10.2-x86-64.Linux-x86_64.tar.xz
+        tar -xvf immortalwrt-imagebuilder-24.10.2-x86-64.Linux-x86_64.tar.xz
+        mv immortalwrt-imagebuilder-* imagebuilder
 
-      - name: 验证 PPPoE 输入
-        run: |
-          if [ "${{ inputs.enable_pppoe }}" = "yes" ]; then
-            if [ -z "${{ inputs.pppoe_account }}" ] || [ -z "${{ inputs.pppoe_password }}" ]; then
-              echo "错误: 启用 PPPoE 时必须提供宽带账号和密码！"
-              exit 1
-            fi
-          fi
+    - name: Download latest plugin IPKs (auto update)
+      run: |
+        mkdir -p packages
+        # 示例：下载OpenClash最新IPK（替换为实际Release URL，根据插件调整）
+        curl -s https://api.github.com/repos/vernesong/OpenClash/releases/latest | jq -r '.assets[] | select(.name | endswith("_x86_64.ipk")) | .browser_download_url' | xargs -I {} curl -L {} -o packages/luci-app-openclash.ipk
+        # AdGuardHome
+        curl -s https://api.github.com/repos/rufengsuixing/luci-app-adguardhome/releases/latest | jq -r '.assets[] | select(.name | endswith("_x86_64.ipk")) | .browser_download_url' | xargs -I {} curl -L {} -o packages/luci-app-adguardhome.ipk
+        # quickstart（假设从兼容仓库，如wukongdaily/store）
+        curl -L https://github.com/wukongdaily/store/raw/main/run/x86/quickstart/luci-app-quickstart_x86_64.ipk -o packages/luci-app-quickstart.ipk
+        # dockerman
+        curl -s https://api.github.com/repos/lisaac/luci-app-dockerman/releases/latest | jq -r '.assets[] | select(.name | endswith("_x86_64.ipk")) | .browser_download_url' | xargs -I {} curl -L {} -o packages/luci-app-dockerman.ipk
+        # nikki（假设存在，替换URL）
+        curl -L https://example.com/luci-app-nikki_x86_64.ipk -o packages/luci-app-nikki.ipk  # 如无，搜索兼容IPK
+        # store (iStore)
+        curl -L https://github.com/linkease/istore/raw/main/packages/luci-app-store_x86_64.ipk -o packages/luci-app-store.ipk
+        # upnp
+        curl -L https://downloads.immortalwrt.org/releases/24.10.2/packages/x86_64/luci/luci-app-upnp_x86_64.ipk -o packages/luci-app-upnp.ipk
+        # lucky
+        curl -L https://github.com/gdy666/luci-app-lucky/raw/master/luci-app-lucky_x86_64.ipk -o packages/luci-app-lucky.ipk
+        # 主题: luci-theme-argon
+        curl -s https://api.github.com/repos/jerrykuku/luci-theme-argon/releases/latest | jq -r '.assets[] | select(.name | endswith("_x86_64.ipk")) | .browser_download_url' | xargs -I {} curl -L {} -o packages/luci-theme-argon.ipk
+        # 添加内核依赖示例（针对OpenClash等，如iptables-mod-tproxy）
+        curl -L https://downloads.immortalwrt.org/releases/24.10.2/packages/x86_64/base/iptables-mod-tproxy_x86_64.ipk -o packages/iptables-mod-tproxy.ipk
+        # 根据插件需要，添加更多依赖...
 
-      - name: 构建 OpenWrt 固件
-        run: |
-          echo "构建参数: PROFILE=${{ inputs.profile }}, INCLUDE_DOCKER=${{ inputs.include_docker }}, ENABLE_PPPOE=${{ inputs.enable_pppoe }}"
-          docker_volumes="-v ${{ github.workspace }}/bin:/home/build/openwrt/bin -v ${{ github.workspace }}/x86-64/24.10/build.sh:/home/build/openwrt/build.sh"
-          if [ "${{ inputs.enable_pppoe }}" = "yes" ]; then
-            docker_volumes="$docker_volumes -v ${{ github.workspace }}/x86-64/24.10/pppoe-config.sh:/home/build/openwrt/pppoe-config.sh"
-          fi
-          docker run --rm -i \
-            --user root \
-            $docker_volumes \
-            -e OPENWRT_VERSION="${{ inputs.version }}" \
-            -e TARGET="${{ inputs.target }}" \
-            -e SUBTARGET="${{ inputs.subtarget }}" \
-            -e PROFILE="${{ inputs.profile }}" \
-            -e ROOTFS_PARTSIZE="${{ inputs.rootfs_size }}" \
-            -e INCLUDE_DOCKER="${{ inputs.include_docker }}" \
-            -e ENABLE_PPPOE="${{ inputs.enable_pppoe }}" \
-            -e PPPOE_ACCOUNT="${{ inputs.pppoe_account }}" \
-            -e PPPOE_PASSWORD="${{ inputs.pppoe_password }}" \
-            immortalwrt/imagebuilder:x86-64-openwrt-24.10.0 \
-            /bin/bash /home/build/openwrt/build.sh || {
-              echo "Docker 构建失败，检查容器日志"
-              exit 1
-            }
+    - name: Prepare custom files and packages
+      run: |
+        chmod +x shell/custom-packages.sh
+        . shell/custom-packages.sh  # 加载自定义包列表
 
-      - name: 生成固件校验和
-        run: |
-          mkdir -p bin/targets/${{ inputs.target }}/${{ inputs.subtarget }}
-          cp bin/*squashfs-combined*.img.gz bin/targets/${{ inputs.target }}/${{ inputs.subtarget }}/ 2>/dev/null || echo "未找到固件文件"
-          cd bin/targets/${{ inputs.target }}/${{ inputs.subtarget }}
-          for file in *squashfs-combined*.img.gz; do
-            if [ -f "$file" ]; then
-              sha256sum "$file" > "$file.sha256"
-              sha256sum -c "$file.sha256"
-            fi
-          done
-          ls -l
+    - name: Build firmware
+      working-directory: imagebuilder
+      run: |
+        make image PROFILE="generic" \
+          PACKAGES="$CUSTOM_PACKAGES luci-theme-argon" \
+          FILES="../files" \
+          EXTRA_IMAGE_NAME="custom-04543473-$(date +%Y%m%d)" \
+          ROOTFS_PARTSIZE=1024  # 系统分区1024MB（boot默认32MB，通过img生成控制）
+          # 其他参数：如启用Docker -docker
 
-      - name: 上传固件
-        uses: actions/upload-artifact@v4
-        with:
-          name: openwrt-固件
-          path: bin/targets/${{ inputs.target }}/${{ inputs.subtarget }}/*
+    - name: Upload artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: immortalwrt-x86_64
+        path: imagebuilder/bin/targets/x86/64/*.img.gz
