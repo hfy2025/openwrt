@@ -21,8 +21,8 @@ jobs:
     - name: Determine latest ImmortalWrt version
       id: get_version
       run: |
-        # 尝试获取最新的 24.10.x 版本
-        VERSION=$(curl -s https://downloads.immortalwrt.org/releases/ | grep -oE '24\.10\.[0-9]+' | sort -Vr | head -n1)
+        # 获取 releases 目录下的最新 24.10.x 版本
+        VERSION=$(curl -s https://downloads.immortalwrt.org/releases/ | grep -oE '24\.10\.[0-9]+' | sort -Vr | head -n1 || echo "24.10.0")
         echo "Using ImmortalWrt version: $VERSION"
         echo "VERSION=$VERSION" >> $GITHUB_ENV
 
@@ -31,11 +31,15 @@ jobs:
         IMAGEBUILDER_URL="https://downloads.immortalwrt.org/releases/${{ env.VERSION }}/targets/x86/64/immortalwrt-imagebuilder-${{ env.VERSION }}-x86-64.Linux-x86_64.tar.xz"
         echo "Downloading ImageBuilder from: $IMAGEBUILDER_URL"
         wget -q --tries=3 --timeout=30 "$IMAGEBUILDER_URL" -O immortalwrt-imagebuilder.tar.xz || {
-          echo "Error: Failed to download ImageBuilder. Checking snapshot..."
-          wget -q https://downloads.immortalwrt.org/snapshots/targets/x86/64/immortalwrt-imagebuilder-snapshot-x86-64.Linux-x86_64.tar.xz -O immortalwrt-imagebuilder.tar.xz
+          echo "Failed to download ImageBuilder for version ${{ env.VERSION }}. Checking snapshot..."
+          SNAPSHOT_URL="https://downloads.immortalwrt.org/snapshots/targets/x86/64/immortalwrt-imagebuilder-openwrt-x86-64.Linux-x86_64.tar.xz"
+          wget -q --tries=3 --timeout=30 "$SNAPSHOT_URL" -O immortalwrt-imagebuilder.tar.xz || {
+            echo "Error: Failed to download snapshot ImageBuilder."
+            exit 1
+          }
         }
         tar -xvf immortalwrt-imagebuilder.tar.xz
-        mv immortalwrt-imagebuilder-* imagebuilder
+        mv immortalwrt-imagebuilder-* imagebuilder || mv openwrt-imagebuilder-* imagebuilder
 
     - name: Download latest plugin IPKs (auto update)
       run: |
@@ -44,11 +48,11 @@ jobs:
         curl -s https://api.github.com/repos/vermilion/OpenClash/releases/latest | jq -r '.assets[] | select(.name | endswith("_x86_64.ipk")) | .browser_download_url' | xargs -I {} curl -L {} -o packages/luci-app-openclash.ipk || echo "Failed to download OpenClash, continuing..."
         # AdGuardHome
         curl -s https://api.github.com/repos/rufengsuixing/luci-app-adguardhome/releases/latest | jq -r '.assets[] | select(.name | endswith("_x86_64.ipk")) | .browser_download_url' | xargs -I {} curl -L {} -o packages/luci-app-adguardhome.ipk || echo "Failed to download AdGuardHome, continuing..."
-        # quickstart (从参考仓库或其他)
+        # quickstart (假设从 wukongdaily/store)
         curl -L https://github.com/wukongdaily/store/raw/main/run/x86/quickstart/luci-app-quickstart_x86_64.ipk -o packages/luci-app-quickstart.ipk || echo "Failed to download quickstart, continuing..."
         # dockerman
         curl -s https://api.github.com/repos/lisaac/luci-app-dockerman/releases/latest | jq -r '.assets[] | select(.name | endswith("_x86_64.ipk")) | .browser_download_url' | xargs -I {} curl -L {} -o packages/luci-app-dockerman.ipk || echo "Failed to download dockerman, continuing..."
-        # nikki (假设，替换为实际URL)
+        # nikki (占位，需替换为实际URL)
         curl -L https://example.com/luci-app-nikki_x86_64.ipk -o packages/luci-app-nikki.ipk || echo "Failed to download nikki, continuing..."
         # store (iStore)
         curl -L https://github.com/linkease/istore/raw/main/packages/luci-app-store_x86_64.ipk -o packages/luci-app-store.ipk || echo "Failed to download store, continuing..."
@@ -74,8 +78,7 @@ jobs:
           FILES="../files" \
           EXTRA_IMAGE_NAME="custom-04543473-$(date +%Y%m%d)" \
           ROOTFS_PARTSIZE=1024 \
-          CONFIG_TARGET_KERNEL_PARTSIZE=32  # 内核分区32MB
-          # 启用Docker支持（可选）
+          CONFIG_TARGET_KERNEL_PARTSIZE=32 \
           DOCKER="1"
 
     - name: Upload artifact
