@@ -1,3 +1,4 @@
+```yaml
 name: 构建自定义 OpenWrt 固件
 
 on:
