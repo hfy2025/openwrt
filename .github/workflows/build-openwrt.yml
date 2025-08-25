@@ -44,13 +44,15 @@ jobs:
       - name: 清理工作目录
         run: |
           echo "清理当前工作目录以避免缓存问题"
-          rm -rf *.tar.zst *.tar openwrt-imagebuilder-* sha256sums
+          rm -rf *.tar.zst *.tar openwrt-imagebuilder-* openwrt-sdk-* sha256sums
           ls -l
 
       - name: 下载并验证 OpenWrt 镜像构建工具
         run: |
           URL="https://downloads.openwrt.org/releases/${{ inputs.version }}/targets/${{ inputs.target }}/${{ inputs.subtarget }}/openwrt-imagebuilder-${{ inputs.version }}-${{ inputs.target }}-${{ inputs.subtarget }}.Linux-x86_64.tar.zst"
           SHA256SUMS_URL="https://downloads.openwrt.org/releases/${{ inputs.version }}/targets/${{ inputs.target }}/${{ inputs.subtarget }}/sha256sums"
+          echo "正在验证 Image Builder URL: $URL"
+          curl -I "$URL" | grep -i "content-disposition" || { echo "URL 可能不正确，未找到 ImageBuilder 文件"; exit 1; }
           echo "正在下载 Image Builder: $URL"
           wget --no-cache "$URL" || { echo "主服务器下载失败，尝试镜像服务器"; wget --no-cache "http://mirror2.openwrt.org/releases/${{ inputs.version }}/targets/${{ inputs.target }}/${{ inputs.subtarget }}/openwrt-imagebuilder-${{ inputs.version }}-${{ inputs.target }}-${{ inputs.subtarget }}.Linux-x86_64.tar.zst" || { echo "镜像服务器也失败，请检查 URL 或网络"; exit 1; }; }
           echo "下载校验和文件"
@@ -75,13 +77,14 @@ jobs:
           fi
           echo "检查 defconfig 目标是否在 Makefile 中"
           if ! grep -q "defconfig:" Makefile; then
-            echo "Makefile 中缺少 defconfig 目标，ImageBuilder 可能不完整"
+            echo "Makefile 中缺少 defconfig 目标，可能是下载了 SDK 或其他文件"
             cat Makefile
             exit 1
           fi
           echo "检查关键目录和文件"
-          ls -lR scripts/config 2>/dev/null || echo "scripts/config 目录缺失"
+          ls -lR scripts/config 2>/dev/null || echo "scripts/config 目录缺失，可能导致 make defconfig 失败"
           ls -lR package/ 2>/dev/null | head -n 20 || echo "package 目录缺失"
+          ls -lR target/ 2>/dev/null | head -n 20 || echo "target 目录缺失"
           echo "当前目录: $(pwd)"
           ls -lR | head -n 100
 
@@ -98,7 +101,7 @@ jobs:
           fi
           echo "检查 defconfig 目标是否在 Makefile 中"
           if ! grep -q "defconfig:" Makefile; then
-            echo "Makefile 中缺少 defconfig 目标，ImageBuilder 可能不完整"
+            echo "Makefile 中缺少 defconfig 目标，可能是下载了 SDK 或其他文件"
             cat Makefile
             exit 1
           fi
