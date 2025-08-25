@@ -38,11 +38,22 @@ jobs:
           echo "检查已安装的包"
           dpkg -l | grep -E 'zstd|build-essential|libncurses5-dev|gawk|git|gettext|make|gcc|g\+\+|unzip|file|python3'
 
-      - name: 下载 OpenWrt 镜像构建工具
+      - name: 清理工作目录
+        run: |
+          echo "清理当前工作目录以避免缓存问题"
+          rm -rf *.tar.zst *.tar openwrt-imagebuilder-*
+          ls -l
+
+      - name: 下载并验证 OpenWrt 镜像构建工具
         run: |
           URL="https://downloads.openwrt.org/releases/${{ inputs.version }}/targets/${{ inputs.target }}/${{ inputs.subtarget }}/openwrt-imagebuilder-${{ inputs.version }}-${{ inputs.target }}-${{ inputs.subtarget }}.Linux-x86_64.tar.zst"
+          SHA256SUMS_URL="https://downloads.openwrt.org/releases/${{ inputs.version }}/targets/${{ inputs.target }}/${{ inputs.subtarget }}/sha256sums"
           echo "正在下载 Image Builder: $URL"
           wget "$URL" || { echo "主服务器下载失败，尝试镜像服务器"; wget "http://mirror2.openwrt.org/releases/${{ inputs.version }}/targets/${{ inputs.target }}/${{ inputs.subtarget }}/openwrt-imagebuilder-${{ inputs.version }}-${{ inputs.target }}-${{ inputs.subtarget }}.Linux-x86_64.tar.zst" || { echo "镜像服务器也失败，请检查 URL 或网络"; exit 1; }; }
+          echo "下载校验和文件"
+          wget "$SHA256SUMS_URL" || { echo "下载校验和文件失败"; exit 1; }
+          echo "验证 Image Builder 文件完整性"
+          sha256sum -c sha256sums --ignore-missing | grep "openwrt-imagebuilder-${{ inputs.version }}-${{ inputs.target }}-${{ inputs.subtarget }}.Linux-x86_64.tar.zst" || { echo "校验和验证失败，文件可能损坏"; exit 1; }
           echo "解压 zst 文件"
           zstd -d *.tar.zst || { echo "zstd 解压失败"; exit 1; }
           echo "解压 tar 文件"
@@ -62,11 +73,11 @@ jobs:
           echo "检查 defconfig 目标是否在 Makefile 中"
           if ! grep -q "defconfig:" Makefile; then
             echo "Makefile 中缺少 defconfig 目标，ImageBuilder 可能不完整"
-            head -n 20 Makefile
+            head -n 30 Makefile
             exit 1
           fi
           echo "当前目录: $(pwd)"
-          ls -l
+          ls -lR | head -n 50
 
       - name: 下载第三方插件包
         working-directory: ./openwrt-imagebuilder-${{ inputs.version }}-${{ inputs.target }}-${{ inputs.subtarget }}.Linux-x86_64
@@ -124,11 +135,11 @@ jobs:
           echo "检查 defconfig 目标是否在 Makefile 中"
           if ! grep -q "defconfig:" Makefile; then
             echo "Makefile 中缺少 defconfig 目标，ImageBuilder 可能不完整"
-            head -n 20 Makefile
+            head -n 30 Makefile
             exit 1
           fi
           echo "执行 make defconfig"
-          make defconfig V=99 || { echo "make defconfig 失败"; ls -l; cat repositories.conf; exit 1; }
+          make defconfig V=99 || { echo "make defconfig 失败"; ls -lR | head -n 50; cat repositories.conf; exit 1; }
 
       - name: 构建自定义固件
         working-directory: ./openwrt-imagebuilder-${{ inputs.version }}-${{ inputs.target }}-${{ inputs.subtarget }}.Linux-x86_64
