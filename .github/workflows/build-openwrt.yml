@@ -34,7 +34,7 @@ jobs:
       - name: 安装依赖工具
         run: |
           sudo apt-get update
-          sudo apt-get install -y zstd build-essential libncurses5-dev gawk git gettext make gcc g++ unzip file python3
+          sudo apt-get install -y zstd build-essential libncurses5-dev gawk git gettext make gcc g++ unzip file python3 python3-venv python3-pip
           echo "检查已安装的包"
           dpkg -l | grep -E 'zstd|build-essential|libncurses5-dev|gawk|git|gettext|make|gcc|g\+\+|unzip|file|python3'
 
@@ -57,6 +57,12 @@ jobs:
           if [ ! -f Makefile ]; then
             echo "Makefile 不存在，ImageBuilder 目录可能损坏"
             ls -l
+            exit 1
+          fi
+          echo "检查 defconfig 目标是否在 Makefile 中"
+          if ! grep -q "defconfig:" Makefile; then
+            echo "Makefile 中缺少 defconfig 目标，ImageBuilder 可能不完整"
+            head -n 20 Makefile
             exit 1
           fi
           echo "当前目录: $(pwd)"
@@ -105,6 +111,7 @@ jobs:
           if ! grep -q "src/gz openwrt_luci" repositories.conf; then
             echo "src/gz openwrt_luci https://downloads.openwrt.org/releases/${{ inputs.version }}/packages/${{ inputs.target }}/luci" >> repositories.conf
           fi
+          # 使用相对路径
           echo "src/gz custom_packages file://$(pwd)/packages" >> repositories.conf
           echo "软件源配置内容:"
           cat repositories.conf
@@ -114,8 +121,14 @@ jobs:
             ls -l
             exit 1
           fi
+          echo "检查 defconfig 目标是否在 Makefile 中"
+          if ! grep -q "defconfig:" Makefile; then
+            echo "Makefile 中缺少 defconfig 目标，ImageBuilder 可能不完整"
+            head -n 20 Makefile
+            exit 1
+          fi
           echo "执行 make defconfig"
-          make defconfig V=99 || { echo "make defconfig 失败"; ls -l; exit 1; }
+          make defconfig V=99 || { echo "make defconfig 失败"; ls -l; cat repositories.conf; exit 1; }
 
       - name: 构建自定义固件
         working-directory: ./openwrt-imagebuilder-${{ inputs.version }}-${{ inputs.target }}-${{ inputs.subtarget }}.Linux-x86_64
