@@ -34,13 +34,13 @@ jobs:
       - name: 安装依赖工具
         run: |
           sudo apt-get update
-          sudo apt-get install -y zstd build-essential libncurses5-dev gawk git gettext
+          sudo apt-get install -y zstd build-essential libncurses5-dev gawk git gettext make gcc g++ unzip file python3 python3-distutils
 
       - name: 下载 OpenWrt 镜像构建工具
         run: |
           URL="https://downloads.openwrt.org/releases/${{ inputs.version }}/targets/${{ inputs.target }}/${{ inputs.subtarget }}/openwrt-imagebuilder-${{ inputs.version }}-${{ inputs.target }}-${{ inputs.subtarget }}.Linux-x86_64.tar.zst"
           echo "正在下载 Image Builder: $URL"
-          wget $URL || { echo "主服务器下载失败，尝试镜像服务器"; wget "http://mirror2.openwrt.org/releases/${{ inputs.version }}/targets/${{ inputs.target }}/${{ inputs.subtarget }}/openwrt-imagebuilder-${{ inputs.version }}-${{ inputs.target }}-${{ inputs.subtarget }}.Linux-x86_64.tar.zst" || { echo "镜像服务器也失败，请检查 URL 或网络"; exit 1; }; }
+          wget "$URL" || { echo "主服务器下载失败，尝试镜像服务器"; wget "http://mirror2.openwrt.org/releases/${{ inputs.version }}/targets/${{ inputs.target }}/${{ inputs.subtarget }}/openwrt-imagebuilder-${{ inputs.version }}-${{ inputs.target }}-${{ inputs.subtarget }}.Linux-x86_64.tar.zst" || { echo "镜像服务器也失败，请检查 URL 或网络"; exit 1; }; }
           echo "解压 zst 文件"
           zstd -d *.tar.zst || { echo "zstd 解压失败"; exit 1; }
           echo "解压 tar 文件"
@@ -51,6 +51,14 @@ jobs:
           IMAGE_BUILDER_DIR="openwrt-imagebuilder-${{ inputs.version }}-${{ inputs.target }}-${{ inputs.subtarget }}.Linux-x86_64"
           echo "目标目录: $IMAGE_BUILDER_DIR"
           cd "$IMAGE_BUILDER_DIR" || { echo "进入 Image Builder 目录失败，目录名可能不正确"; ls -l; exit 1; }
+          echo "检查 Makefile 是否存在"
+          if [ ! -f Makefile ]; then
+            echo "Makefile 不存在，ImageBuilder 目录可能损坏"
+            ls -l
+            exit 1
+          fi
+          echo "当前目录: $(pwd)"
+          ls -l
 
       - name: 下载第三方插件包
         working-directory: ./openwrt-imagebuilder-${{ inputs.version }}-${{ inputs.target }}-${{ inputs.subtarget }}.Linux-x86_64
@@ -65,9 +73,10 @@ jobs:
             HTML=$(curl -s "$BASE_URL")
             LATEST=$(echo "$HTML" | grep -o 'href="[^"]*\.ipk"' | sed 's/href="//;s/"$//' | grep -E "$PATTERN" | sort -V | tail -1)
             if [ -n "$LATEST" ]; then
-              wget "${BASE_URL}${LATEST}"
+              echo "正在下载 $PACKAGE: ${BASE_URL}${LATEST}"
+              wget "${BASE_URL}${LATEST}" || { echo "下载 $PACKAGE 失败"; exit 1; }
             else
-              echo "No matching file for $PACKAGE"
+              echo "未找到 $PACKAGE 的匹配文件"
             fi
           }
           download_latest_ipk "luci-theme-argon" "luci-theme-argon_.*_all\.ipk"
@@ -83,15 +92,28 @@ jobs:
           download_latest_ipk "luci-app-upnp" "luci-app-upnp_.*_all\.ipk"
           download_latest_ipk "kmod-tun" "kmod-tun_.*_x86_64\.ipk"
           download_latest_ipk "kmod-ipt-fullconenat" "kmod-ipt-fullconenat_.*_x86_64\.ipk"
+          echo "检查下载的包"
+          ls -l
           cd ..
 
       - name: 更新软件源并添加自定义源
         working-directory: ./openwrt-imagebuilder-${{ inputs.version }}-${{ inputs.target }}-${{ inputs.subtarget }}.Linux-x86_64
         run: |
-          echo "src/gz openwrt_luci https://downloads.openwrt.org/releases/${{ inputs.version }}/packages/x86_64/luci" >> repositories.conf
-          echo "src/gz custom_packages file://${PWD}/packages" >> repositories.conf
+          # 避免重复添加 openwrt_luci
+          if ! grep -q "src/gz openwrt_luci" repositories.conf; then
+            echo "src/gz openwrt_luci https://downloads.openwrt.org/releases/${{ inputs.version }}/packages/${{ inputs.target }}/luci" >> repositories.conf
+          fi
+          echo "src/gz custom_packages file://$(pwd)/packages" >> repositories.conf
+          echo "软件源配置内容:"
           cat repositories.conf
-          make defconfig || { echo "make defconfig 失败"; exit 1; }
+          echo "检查 Makefile 是否存在"
+          if [ ! -f Makefile ]; then
+            echo "Makefile 不存在，ImageBuilder 目录可能损坏"
+            ls -l
+            exit 1
+          fi
+          echo "执行 make defconfig"
+          make defconfig || { echo "make defconfig 失败"; ls -l; exit 1; }
 
       - name: 构建自定义固件
         working-directory: ./openwrt-imagebuilder-${{ inputs.version }}-${{ inputs.target }}-${{ inputs.subtarget }}.Linux-x86_64
