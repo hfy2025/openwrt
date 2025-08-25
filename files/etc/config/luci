@@ -1,0 +1,9 @@
+# 设置默认主题
+
+config internal themes
+    option Argon '/luci-static/argon'
+
+config internal languages
+    option zh_cn 'Chinese'
+
+config internal sauto_set '1'
