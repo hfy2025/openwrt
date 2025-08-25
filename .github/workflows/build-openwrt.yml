@@ -1,3 +1,4 @@
+```yaml
 name: 构建自定义 OpenWrt 固件
 
 on:
@@ -14,15 +15,25 @@ jobs:
       - name: 安装依赖
         run: |
           sudo apt update
-          sudo apt install -y wget tar xz-utils gzip curl jq
+          sudo apt install -y wget tar xz-utils gzip curl jq zstd
+
+      - name: 清理工作目录
+        run: |
+          rm -rf openwrt-imagebuilder
 
       - name: 下载 OpenWrt Image Builder
         run: |
           VERSION="24.10.1"
-          curl -f --connect-timeout 20 --retry 5 --location -o openwrt-imagebuilder-${VERSION}-x86-64.Linux-x86_64.tar.xz https://downloads.openwrt.org/releases/24.10.1/targets/x86/64/openwrt-imagebuilder-24.10.1-x86-64.Linux-x86_64.tar.zst
-          tar -xvf openwrt-imagebuilder-${VERSION}-x86-64.Linux-x86_64.tar.xz
+          curl -f --connect-timeout 20 --retry 5 --location -o openwrt-imagebuilder-${VERSION}-x86-64.Linux-x86_64.tar.zst https://downloads.openwrt.org/releases/24.10.1/targets/x86/64/openwrt-imagebuilder-24.10.1-x86-64.Linux-x86_64.tar.zst
+          zstd -d openwrt-imagebuilder-${VERSION}-x86-64.Linux-x86_64.tar.zst -o openwrt-imagebuilder-${VERSION}-x86-64.Linux-x86_64.tar
+          tar -xvf openwrt-imagebuilder-${VERSION}-x86-64.Linux-x86_64.tar
           mv openwrt-imagebuilder-${VERSION}-x86-64.Linux-x86_64 openwrt-imagebuilder
           cd openwrt-imagebuilder
+          if [ ! -f bin/opkg-make-index ]; then
+            echo "Error: bin/opkg-make-index not found in openwrt-imagebuilder"
+            ls -la bin/
+            exit 1
+          fi
 
       - name: 下载第三方 IPK 包
         run: |
@@ -59,7 +70,7 @@ jobs:
           download_latest_ipk "kmod-ipt-fullconenat" "kmod-ipt-fullconenat_.*_x86_64\.ipk"
           
           cd ..
-          
+
       - name: 创建本地软件源
         run: |
           cd openwrt-imagebuilder
@@ -86,3 +97,4 @@ jobs:
         with:
           name: openwrt-firmware
           path: openwrt-imagebuilder/bin/targets/x86/64/*.img.gz
+```
