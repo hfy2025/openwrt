@@ -53,7 +53,6 @@ jobs:
           cd "$IMAGE_BUILDER_DIR" || { echo "进入 Image Builder 目录失败，目录名可能不正确"; ls -l; exit 1; }
 
       - name: 下载第三方插件包
-        working-directory: ./openwrt-imagebuilder-${{ inputs.version }}-${{ inputs.target }}-${{ inputs.subtarget }}.Linux-x86_64
         run: |
           cd openwrt-imagebuilder
           mkdir -p packages
