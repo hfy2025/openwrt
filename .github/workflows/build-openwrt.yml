@@ -111,7 +111,7 @@ jobs:
             PACKAGES="$PACKAGES luci-app-dockerman docker"
           fi
           if [ "$ENABLE_PPPOE" = "yes" ]; then
-            PACKAGES="$PACKAGES pppoe"
+            PACKAGES="$PACKAGES luci-app-pppoe-server ppp-mod-pppoe"
             mkdir -p files/etc/uci-defaults
             cat > files/etc/uci-defaults/99-custom.sh <<- EOT
             uci set network.wan.proto='pppoe'
@@ -119,6 +119,7 @@ jobs:
             uci set network.wan.password='$PPPOE_PASSWORD'
             uci commit network
             EOT
+            echo "PPPoE 配置文件内容:"
             cat files/etc/uci-defaults/99-custom.sh
           fi
           
