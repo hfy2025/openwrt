@@ -1,3 +1,4 @@
+
 name: 构建自定义 OpenWrt 固件
 
 on:
@@ -38,14 +39,13 @@ jobs:
         run: |
           cd openwrt-imagebuilder
           mkdir -p packages
-          rm -rf packages/*  # 清理 packages 目录内容
+          rm -rf packages/*
           cd packages
-          
           download_latest_ipk() {
             PACKAGE=$1
             PATTERN=$2
             BASE_URL="https://dl.openwrt.ai/releases/24.10/packages/x86_64/kiddin9/"
-            HTML=$(curl -s $BASE_URL)
+            HTML=$(curl -s "$BASE_URL")
             LATEST=$(echo "$HTML" | grep -o 'href="[^"]*\.ipk"' | sed 's/href="//;s/"$//' | grep -E "$PATTERN" | sort -V | tail -1)
             if [ -n "$LATEST" ]; then
               wget "${BASE_URL}${LATEST}"
@@ -53,7 +53,6 @@ jobs:
               echo "No matching file for $PACKAGE"
             fi
           }
-          
           download_latest_ipk "luci-theme-argon" "luci-theme-argon_.*_all\.ipk"
           download_latest_ipk "luci-app-argon-config" "luci-app-argon-config_.*_all\.ipk"
           download_latest_ipk "luci-app-openclash" "luci-app-openclash_.*_all\.ipk"
@@ -67,7 +66,6 @@ jobs:
           download_latest_ipk "luci-app-upnp" "luci-app-upnp_.*_all\.ipk"
           download_latest_ipk "kmod-tun" "kmod-tun_.*_x86_64\.ipk"
           download_latest_ipk "kmod-ipt-fullconenat" "kmod-ipt-fullconenat_.*_x86_64\.ipk"
-          
           cd ..
 
       - name: 创建本地软件源
