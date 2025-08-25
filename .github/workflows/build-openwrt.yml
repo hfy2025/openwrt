@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'OpenWrt 版本号 (24.10.2)'
+        description: 'OpenWrt 版本号 (24.10.0)'
         required: true
-        default: '24.10.2'
+        default: '24.10.0'
       target:
         description: '目标架构 (x86)'
         required: true
@@ -44,7 +44,7 @@ jobs:
       - name: 清理工作目录
         run: |
           echo "清理当前工作目录以避免缓存问题"
-          rm -rf *.tar.zst *.tar openwrt-imagebuilder-*
+          rm -rf *.tar.zst *.tar openwrt-imagebuilder-* sha256sums
           ls -l
 
       - name: 下载并验证 OpenWrt 镜像构建工具
@@ -52,9 +52,9 @@ jobs:
           URL="https://downloads.openwrt.org/releases/${{ inputs.version }}/targets/${{ inputs.target }}/${{ inputs.subtarget }}/openwrt-imagebuilder-${{ inputs.version }}-${{ inputs.target }}-${{ inputs.subtarget }}.Linux-x86_64.tar.zst"
           SHA256SUMS_URL="https://downloads.openwrt.org/releases/${{ inputs.version }}/targets/${{ inputs.target }}/${{ inputs.subtarget }}/sha256sums"
           echo "正在下载 Image Builder: $URL"
-          wget "$URL" || { echo "主服务器下载失败，尝试镜像服务器"; wget "http://mirror2.openwrt.org/releases/${{ inputs.version }}/targets/${{ inputs.target }}/${{ inputs.subtarget }}/openwrt-imagebuilder-${{ inputs.version }}-${{ inputs.target }}-${{ inputs.subtarget }}.Linux-x86_64.tar.zst" || { echo "镜像服务器也失败，请检查 URL 或网络"; exit 1; }; }
+          wget --no-cache "$URL" || { echo "主服务器下载失败，尝试镜像服务器"; wget --no-cache "http://mirror2.openwrt.org/releases/${{ inputs.version }}/targets/${{ inputs.target }}/${{ inputs.subtarget }}/openwrt-imagebuilder-${{ inputs.version }}-${{ inputs.target }}-${{ inputs.subtarget }}.Linux-x86_64.tar.zst" || { echo "镜像服务器也失败，请检查 URL 或网络"; exit 1; }; }
           echo "下载校验和文件"
-          wget "$SHA256SUMS_URL" || { echo "下载校验和文件失败"; exit 1; }
+          wget --no-cache "$SHA256SUMS_URL" || { echo "下载校验和文件失败"; exit 1; }
           echo "验证 Image Builder 文件完整性"
           sha256sum -c sha256sums --ignore-missing | grep "openwrt-imagebuilder-${{ inputs.version }}-${{ inputs.target }}-${{ inputs.subtarget }}.Linux-x86_64.tar.zst" || { echo "校验和验证失败，文件可能损坏"; exit 1; }
           echo "解压 zst 文件"
