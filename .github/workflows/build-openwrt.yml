@@ -63,6 +63,7 @@ jobs:
       - name: 创建本地软件源
         run: |
           cd openwrt-imagebuilder
+          chmod +x bin/opkg-make-index
           bin/opkg-make-index ./packages > ./packages/Packages
           gzip -9c ./packages/Packages > ./packages/Packages.gz
           cp ../custom_repositories.conf repositories.conf
