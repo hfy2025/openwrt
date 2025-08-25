@@ -18,12 +18,11 @@ jobs:
 
       - name: 下载 OpenWrt Image Builder
         run: |
-          VERSION="24.10.2"
-          URL="https://downloads.openwrt.org/releases/${{ inputs.version }}/targets/${{ inputs.target }}/${{ inputs.subtarget }}/openwrt-imagebuilder-${{ inputs.version }}-${{ inputs.target }}-${{ inputs.subtarget }}.Linux-x86_64.tar.zst"
-          wget $URL || wget "http://mirror2.openwrt.org/releases/${{ inputs.version }}/targets/${{ inputs.target }}/${{ inputs.subtarget }}/openwrt-imagebuilder-${{ inputs.version }}-${{ inputs.target }}-${{ inputs.subtarget }}.Linux-x86_64.tar.zst"
-          zstd -d *.tar.zst
-          tar -xvf *.tar
-          cd openwrt-imagebuilder-*
+          VERSION="24.10.1"
+          curl -f --connect-timeout 20 --retry 5 --location -o openwrt-imagebuilder-${VERSION}-x86-64.Linux-x86_64.tar.xz https://downloads.openwrt.org/releases/24.10.1/targets/x86/64/openwrt-imagebuilder-24.10.1-x86-64.Linux-x86_64.tar.zst
+          tar -xvf openwrt-imagebuilder-${VERSION}-x86-64.Linux-x86_64.tar.xz
+          mv openwrt-imagebuilder-${VERSION}-x86-64.Linux-x86_64 openwrt-imagebuilder
+          cd openwrt-imagebuilder
 
       - name: 下载第三方 IPK 包
         run: |
