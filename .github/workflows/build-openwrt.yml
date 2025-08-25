@@ -48,14 +48,31 @@ on:
 
 jobs:
   build_job:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     steps:
       - name: 检出代码仓库
         uses: actions/checkout@v4
 
-      - name: 安装依赖工具
+      - name: 清理冲突包并安装 Docker
         run: |
+          echo "检查现有包状态"
+          dpkg -l | grep -E 'docker|containerd|runc' || echo "无相关包"
+          echo "清理可能冲突的包"
+          sudo apt-get remove -y docker.io docker-doc docker-compose podman-docker containerd runc containerd.io || echo "未找到要移除的包"
+          sudo apt-get autoremove -y
+          sudo apt-get purge -y containerd containerd.io runc || echo "未找到要清除的包"
+          echo "检查被锁定的包"
+          apt-mark showhold
+          echo "添加 Docker 官方 GPG 密钥和仓库"
           sudo apt-get update
+          sudo apt-get install -y ca-certificates curl
+          sudo install -m 0755 -d /etc/apt/keyrings
+          curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+          sudo chmod a+r /etc/apt/keyrings/docker.gpg
+          echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+          echo "再次更新软件源"
+          sudo apt-get update
+          echo "安装 docker.io"
           sudo apt-get install -y docker.io
           sudo systemctl start docker
           echo "检查 Docker 版本"
@@ -105,7 +122,7 @@ jobs:
             cat files/etc/uci-defaults/99-custom.sh
           fi
           
-          # 构建固件
+          # 更新软件源并构建固件
           echo "开始构建固件，包列表: $PACKAGES"
           make image PROFILE="$PROFILE" PACKAGES="$PACKAGES" EXTRA_IMAGE_NAME="custom" ROOTFS_PARTSIZE="$ROOTFS_PARTSIZE" FILES="files/" V=s || {
             echo "make image 失败，输出目录结构"
