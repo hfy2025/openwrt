@@ -4,25 +4,25 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'OpenWrt 版本号 (如 24.10.2)'
+        description: 'OpenWrt 版本号 (24.10.2)'
         required: true
         default: '24.10.2'
       target:
-        description: '目标架构 (如 x86)'
+        description: '目标架构 (x86)'
         required: true
         default: 'x86'
       subtarget:
-        description: '子目标 (如 64)'
+        description: '子目标 (64)'
         required: true
         default: '64'
       profile:
-        description: '设备配置文件 (如 generic)'
+        description: '设备配置文件 (generic)'
         required: true
         default: 'generic'
       rootfs_size:
-        description: '根文件系统分区大小 (MiB, 如 256)'
+        description: '根文件系统分区大小 (MiB, 1024)'
         required: true
-        default: '256'
+        default: '1024'
 
 jobs:
   build_job:
