@@ -23,6 +23,28 @@ on:
         description: '根文件系统分区大小 (MiB, 1024)'
         required: true
         default: '1024'
+      include_docker:
+        description: '是否包含 Docker 插件'
+        required: true
+        default: 'yes'
+        type: choice
+        options:
+          - 'yes'
+          - 'no'
+      enable_pppoe:
+        description: '是否配置 PPPoE 拨号信息'
+        required: true
+        default: 'no'
+        type: choice
+        options:
+          - 'yes'
+          - 'no'
+      pppoe_account:
+        description: '宽带账号 (若启用 PPPoE)'
+        required: false
+      pppoe_password:
+        description: '宽带密码 (若启用 PPPoE)'
+        required: false
 
 jobs:
   build_job:
@@ -34,91 +56,94 @@ jobs:
       - name: 安装依赖工具
         run: |
           sudo apt-get update
-          sudo apt-get install -y zstd build-essential libncurses5-dev gawk git gettext make gcc g++ unzip file python3 python3-venv python3-pip
-          echo "检查已安装的包"
-          dpkg -l | grep -E 'zstd|build-essential|libncurses5-dev|gawk|git|gettext|make|gcc|g\+\+|unzip|file|python3'
-          echo "检查 make 和 python3 版本"
-          make --version
-          python3 --version
+          sudo apt-get install -y docker.io
+          sudo systemctl start docker
+          echo "检查 Docker 版本"
+          docker --version
 
-      - name: 清理工作目录
+      - name: 创建构建脚本
         run: |
-          echo "清理当前工作目录以避免缓存问题"
-          rm -rf *.tar.zst *.tar openwrt-imagebuilder-* openwrt-sdk-* sha256sums
-          ls -l
-
-      - name: 下载并验证 OpenWrt 镜像构建工具
-        run: |
-          URL="https://downloads.openwrt.org/releases/${{ inputs.version }}/targets/${{ inputs.target }}/${{ inputs.subtarget }}/openwrt-imagebuilder-${{ inputs.version }}-${{ inputs.target }}-${{ inputs.subtarget }}.Linux-x86_64.tar.zst"
-          SHA256SUMS_URL="https://downloads.openwrt.org/releases/${{ inputs.version }}/targets/${{ inputs.target }}/${{ inputs.subtarget }}/sha256sums"
-          echo "正在验证 Image Builder URL: $URL"
-          curl -sI "$URL" | grep -E "^HTTP/[0-9.]+ 200" || { echo "URL 返回非 200 状态，可能是无效地址"; curl -I "$URL"; exit 1; }
-          echo "正在下载 Image Builder: $URL"
-          wget --no-cache "$URL" || { echo "主服务器下载失败，尝试镜像服务器"; wget --no-cache "http://mirror2.openwrt.org/releases/${{ inputs.version }}/targets/${{ inputs.target }}/${{ inputs.subtarget }}/openwrt-imagebuilder-${{ inputs.version }}-${{ inputs.target }}-${{ inputs.subtarget }}.Linux-x86_64.tar.zst" || { echo "镜像服务器也失败，请检查 URL 或网络"; exit 1; }; }
-          echo "检查下载文件"
-          ls -lh *.tar.zst
-          echo "下载校验和文件"
-          wget --no-cache "$SHA256SUMS_URL" || { echo "下载校验和文件失败"; exit 1; }
-          echo "验证 Image Builder 文件完整性"
-          sha256sum -c sha256sums --ignore-missing | grep "openwrt-imagebuilder-${{ inputs.version }}-${{ inputs.target }}-${{ inputs.subtarget }}.Linux-x86_64.tar.zst" || { echo "校验和验证失败，文件可能损坏"; cat sha256sums | grep imagebuilder; exit 1; }
-          echo "解压 zst 文件"
-          zstd -d *.tar.zst || { echo "zstd 解压失败"; exit 1; }
-          echo "解压 tar 文件"
-          tar -xvf *.tar || { echo "tar 解压失败"; exit 1; }
-          echo "列出当前目录内容"
-          ls -l
-          echo "进入 Image Builder 目录"
-          IMAGE_BUILDER_DIR="openwrt-imagebuilder-${{ inputs.version }}-${{ inputs.target }}-${{ inputs.subtarget }}.Linux-x86_64"
-          echo "目标目录: $IMAGE_BUILDER_DIR"
-          cd "$IMAGE_BUILDER_DIR" || { echo "进入 Image Builder 目录失败，目录名可能不正确"; ls -l; exit 1; }
-          echo "检查 Makefile 是否存在"
-          if [ ! -f Makefile ]; then
-            echo "Makefile 不存在，ImageBuilder 目录可能损坏"
-            ls -l
-            exit 1
-          fi
-          echo "检查 defconfig 目标是否在 Makefile 中"
-          if ! grep -q "defconfig:" Makefile; then
-            echo "Makefile 中缺少 defconfig 目标，可能是下载了 SDK 或其他文件"
-            cat Makefile
-            exit 1
-          fi
-          echo "检查关键目录和文件"
-          ls -lR scripts/config 2>/dev/null || echo "scripts/config 目录缺失，可能导致 make defconfig 失败"
-          ls -lR package/ 2>/dev/null | head -n 20 || echo "package 目录缺失"
-          ls -lR target/ 2>/dev/null | head -n 20 || echo "target 目录缺失"
+          mkdir -p x86-64/24.10
+          cat << 'EOF' > x86-64/24.10/build.sh
+          #!/bin/bash
+          set -e
           echo "当前目录: $(pwd)"
-          ls -lR | head -n 100
-
-      - name: 更新软件源
-        working-directory: ./openwrt-imagebuilder-${{ inputs.version }}-${{ inputs.target }}-${{ inputs.subtarget }}.Linux-x86_64
-        run: |
-          echo "软件源配置内容（原始）:"
+          echo "构建参数: PROFILE=$PROFILE, INCLUDE_DOCKER=$INCLUDE_DOCKER, ENABLE_PPPOE=$ENABLE_PPPOE"
+          
+          # 配置软件源
+          echo "src/gz openwrt_core https://downloads.openwrt.org/releases/$OPENWRT_VERSION/targets/$TARGET/$SUBTARGET/packages" > repositories.conf
+          echo "src/gz openwrt_base https://downloads.openwrt.org/releases/$OPENWRT_VERSION/packages/x86_64/base" >> repositories.conf
+          echo "src/gz openwrt_luci https://downloads.openwrt.org/releases/$OPENWRT_VERSION/packages/x86_64/luci" >> repositories.conf
+          echo "src/gz openwrt_packages https://downloads.openwrt.org/releases/$OPENWRT_VERSION/packages/x86_64/packages" >> repositories.conf
+          echo "src/gz openwrt_routing https://downloads.openwrt.org/releases/$OPENWRT_VERSION/packages/x86_64/routing" >> repositories.conf
           cat repositories.conf
-          echo "检查 Makefile 是否存在"
-          if [ ! -f Makefile ]; then
-            echo "Makefile 不存在，ImageBuilder 目录可能损坏"
-            ls -l
-            exit 1
-          fi
-          echo "检查 defconfig 目标是否在 Makefile 中"
-          if ! grep -q "defconfig:" Makefile; then
-            echo "Makefile 中缺少 defconfig 目标，可能是下载了 SDK 或其他文件"
-            cat Makefile
-            exit 1
-          fi
-          echo "执行 make defconfig"
-          make defconfig V=99 || { echo "make defconfig 失败"; ls -lR | head -n 100; cat repositories.conf; exit 1; }
-
-      - name: 构建自定义固件
-        working-directory: ./openwrt-imagebuilder-${{ inputs.version }}-${{ inputs.target }}-${{ inputs.subtarget }}.Linux-x86_64
-        run: |
+          
+          # 配置固件
           PACKAGES="luci luci-theme-argon dnsmasq-full -dnsmasq"
+          if [ "$INCLUDE_DOCKER" = "yes" ]; then
+            PACKAGES="$PACKAGES luci-app-dockerman docker"
+          fi
+          if [ "$ENABLE_PPPOE" = "yes" ]; then
+            PACKAGES="$PACKAGES pppoe"
+            mkdir -p files/etc/uci-defaults
+            cat << EOT > files/etc/uci-defaults/99-custom.sh
+            uci set network.wan.proto='pppoe'
+            uci set network.wan.username='$PPPOE_ACCOUNT'
+            uci set network.wan.password='$PPPOE_PASSWORD'
+            uci commit network
+            EOT
+          fi
+          
+          # 构建固件
           echo "开始构建固件，包列表: $PACKAGES"
-          make image PROFILE="${{ inputs.profile }}" PACKAGES="$PACKAGES" EXTRA_IMAGE_NAME="自定义" ROOTFS_PARTSIZE="${{ inputs.rootfs_size }}" || { echo "构建固件失败"; exit 1; }
+          make image PROFILE="$PROFILE" PACKAGES="$PACKAGES" EXTRA_IMAGE_NAME="custom" ROOTFS_PARTSIZE="$ROOTFS_PARTSIZE" FILES="files/"
+          EOF
+          chmod +x x86-64/24.10/build.sh
+          echo "构建脚本内容:"
+          cat x86-64/24.10/build.sh
+
+      - name: 验证 PPPoE 输入
+        run: |
+          if [ "${{ inputs.enable_pppoe }}" == "yes" ]; then
+            if [ -z "${{ inputs.pppoe_account }}" ] || [ -z "${{ inputs.pppoe_password }}" ]; then
+              echo "错误: 启用 PPPoE 时必须提供宽带账号和密码！"
+              exit 1
+            fi
+          fi
+
+      - name: 构建 OpenWrt 固件
+        run: |
+          echo "构建参数: PROFILE=${{ inputs.profile }}, INCLUDE_DOCKER=${{ inputs.include_docker }}, ENABLE_PPPOE=${{ inputs.enable_pppoe }}"
+          docker run --rm -i \
+            --user root \
+            -v "${{ github.workspace }}/bin:/home/build/openwrt/bin" \
+            -v "${{ github.workspace }}/files:/home/build/openwrt/files" \
+            -v "${{ github.workspace }}/x86-64/24.10/build.sh:/home/build/openwrt/build.sh" \
+            -e OPENWRT_VERSION="${{ inputs.version }}" \
+            -e TARGET="${{ inputs.target }}" \
+            -e SUBTARGET="${{ inputs.subtarget }}" \
+            -e PROFILE="${{ inputs.profile }}" \
+            -e ROOTFS_PARTSIZE="${{ inputs.rootfs_size }}" \
+            -e INCLUDE_DOCKER="${{ inputs.include_docker }}" \
+            -e ENABLE_PPPOE="${{ inputs.enable_pppoe }}" \
+            -e PPPOE_ACCOUNT="${{ inputs.pppoe_account }}" \
+            -e PPPOE_PASSWORD="${{ inputs.pppoe_password }}" \
+            openwrt/imagebuilder:x86-64-24.10.0 \
+            /bin/bash /home/build/openwrt/build.sh
+
+      - name: 生成固件校验和
+        run: |
+          mkdir -p bin/targets/${{ inputs.target }}/${{ inputs.subtarget }}
+          cp bin/*squashfs-combined*.img.gz bin/targets/${{ inputs.target }}/${{ inputs.subtarget }}/
+          cd bin/targets/${{ inputs.target }}/${{ inputs.subtarget }}
+          for file in *squashfs-combined*.img.gz; do
+            sha256sum "$file" > "$file.sha256"
+            sha256sum -c "$file.sha256"
+          done
+          ls -l
 
       - name: 上传固件
         uses: actions/upload-artifact@v4
         with:
           name: openwrt-固件
-          path: ./openwrt-imagebuilder-${{ inputs.version }}-${{ inputs.target }}-${{ inputs.subtarget }}.Linux-x86_64/bin/targets/${{ inputs.target }}/${{ inputs.subtarget }}/*
+          path: bin/targets/${{ inputs.target }}/${{ inputs.subtarget }}/*
