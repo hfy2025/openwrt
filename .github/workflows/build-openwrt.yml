@@ -37,6 +37,9 @@ jobs:
           sudo apt-get install -y zstd build-essential libncurses5-dev gawk git gettext make gcc g++ unzip file python3 python3-venv python3-pip
           echo "检查已安装的包"
           dpkg -l | grep -E 'zstd|build-essential|libncurses5-dev|gawk|git|gettext|make|gcc|g\+\+|unzip|file|python3'
+          echo "检查 make 和 python3 版本"
+          make --version
+          python3 --version
 
       - name: 清理工作目录
         run: |
@@ -73,58 +76,19 @@ jobs:
           echo "检查 defconfig 目标是否在 Makefile 中"
           if ! grep -q "defconfig:" Makefile; then
             echo "Makefile 中缺少 defconfig 目标，ImageBuilder 可能不完整"
-            head -n 30 Makefile
+            cat Makefile
             exit 1
           fi
+          echo "检查关键目录和文件"
+          ls -lR scripts/config 2>/dev/null || echo "scripts/config 目录缺失"
+          ls -lR package/ 2>/dev/null | head -n 20 || echo "package 目录缺失"
           echo "当前目录: $(pwd)"
-          ls -lR | head -n 50
+          ls -lR | head -n 100
 
-      - name: 下载第三方插件包
+      - name: 更新软件源
         working-directory: ./openwrt-imagebuilder-${{ inputs.version }}-${{ inputs.target }}-${{ inputs.subtarget }}.Linux-x86_64
         run: |
-          mkdir -p packages
-          rm -rf packages/*
-          cd packages
-          download_latest_ipk() {
-            PACKAGE="$1"
-            PATTERN="$2"
-            BASE_URL="https://dl.openwrt.ai/releases/${{ inputs.version }}/packages/x86_64/kiddin9/"
-            HTML=$(curl -s "$BASE_URL")
-            LATEST=$(echo "$HTML" | grep -o 'href="[^"]*\.ipk"' | sed 's/href="//;s/"$//' | grep -E "$PATTERN" | sort -V | tail -1)
-            if [ -n "$LATEST" ]; then
-              echo "正在下载 $PACKAGE: ${BASE_URL}${LATEST}"
-              wget "${BASE_URL}${LATEST}" || { echo "下载 $PACKAGE 失败"; exit 1; }
-            else
-              echo "未找到 $PACKAGE 的匹配文件"
-            fi
-          }
-          download_latest_ipk "luci-theme-argon" "luci-theme-argon_.*_all\.ipk"
-          download_latest_ipk "luci-app-argon-config" "luci-app-argon-config_.*_all\.ipk"
-          download_latest_ipk "luci-app-openclash" "luci-app-openclash_.*_all\.ipk"
-          download_latest_ipk "luci-app-adguardhome" "luci-app-adguardhome_.*_all\.ipk"
-          download_latest_ipk "luci-app-dockerman" "luci-app-dockerman_.*_all\.ipk"
-          download_latest_ipk "luci-app-lucky" "luci-app-lucky_.*_all\.ipk"
-          download_latest_ipk "luci-app-store" "luci-app-store_.*_all\.ipk"
-          download_latest_ipk "luci-app-nikki" "luci-app-nikki_.*_all\.ipk"
-          download_latest_ipk "luci-app-quickstart" "luci-app-quickstart_.*_all\.ipk"
-          download_latest_ipk "adguardhome" "adguardhome_.*_x86_64\.ipk"
-          download_latest_ipk "luci-app-upnp" "luci-app-upnp_.*_all\.ipk"
-          download_latest_ipk "kmod-tun" "kmod-tun_.*_x86_64\.ipk"
-          download_latest_ipk "kmod-ipt-fullconenat" "kmod-ipt-fullconenat_.*_x86_64\.ipk"
-          echo "检查下载的包"
-          ls -l
-          cd ..
-
-      - name: 更新软件源并添加自定义源
-        working-directory: ./openwrt-imagebuilder-${{ inputs.version }}-${{ inputs.target }}-${{ inputs.subtarget }}.Linux-x86_64
-        run: |
-          # 避免重复添加 openwrt_luci
-          if ! grep -q "src/gz openwrt_luci" repositories.conf; then
-            echo "src/gz openwrt_luci https://downloads.openwrt.org/releases/${{ inputs.version }}/packages/${{ inputs.target }}/luci" >> repositories.conf
-          fi
-          # 使用相对路径
-          echo "src/gz custom_packages file://$(pwd)/packages" >> repositories.conf
-          echo "软件源配置内容:"
+          echo "软件源配置内容（原始）:"
           cat repositories.conf
           echo "检查 Makefile 是否存在"
           if [ ! -f Makefile ]; then
@@ -135,18 +99,18 @@ jobs:
           echo "检查 defconfig 目标是否在 Makefile 中"
           if ! grep -q "defconfig:" Makefile; then
             echo "Makefile 中缺少 defconfig 目标，ImageBuilder 可能不完整"
-            head -n 30 Makefile
+            cat Makefile
             exit 1
           fi
           echo "执行 make defconfig"
-          make defconfig V=99 || { echo "make defconfig 失败"; ls -lR | head -n 50; cat repositories.conf; exit 1; }
+          make defconfig V=99 || { echo "make defconfig 失败"; ls -lR | head -n 100; cat repositories.conf; exit 1; }
 
       - name: 构建自定义固件
         working-directory: ./openwrt-imagebuilder-${{ inputs.version }}-${{ inputs.target }}-${{ inputs.subtarget }}.Linux-x86_64
         run: |
-          PACKAGES="luci luci-theme-argon luci-app-openclash luci-app-adguardhome luci-app-quickstart luci-app-dockerman luci-app-nikki luci-app-store luci-app-upnp luci-app-lucky adguardhome dnsmasq-full -dnsmasq"
+          PACKAGES="luci luci-theme-argon dnsmasq-full -dnsmasq"
           echo "开始构建固件，包列表: $PACKAGES"
-          make image PROFILE="${{ inputs.profile }}" PACKAGES="$PACKAGES" FILES="../files/" EXTRA_IMAGE_NAME="自定义" ROOTFS_PARTSIZE="${{ inputs.rootfs_size }}" || { echo "构建固件失败"; exit 1; }
+          make image PROFILE="${{ inputs.profile }}" PACKAGES="$PACKAGES" EXTRA_IMAGE_NAME="自定义" ROOTFS_PARTSIZE="${{ inputs.rootfs_size }}" || { echo "构建固件失败"; exit 1; }
 
       - name: 上传固件
         uses: actions/upload-artifact@v4
