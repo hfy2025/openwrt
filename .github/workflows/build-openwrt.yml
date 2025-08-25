@@ -10,7 +10,7 @@ on:
       target:
         description: '目标架构 (x86)'
         required: true
-        default: 'x86'
+weil        default: 'x86'
       subtarget:
         description: '子目标 (64)'
         required: true
@@ -53,8 +53,8 @@ jobs:
           cd "$IMAGE_BUILDER_DIR" || { echo "进入 Image Builder 目录失败，目录名可能不正确"; ls -l; exit 1; }
 
       - name: 下载第三方插件包
+        working-directory: ./openwrt-imagebuilder-${{ inputs.version }}-${{ inputs.target }}-${{ inputs.subtarget }}.Linux-x86_64
         run: |
-          cd openwrt-imagebuilder
           mkdir -p packages
           rm -rf packages/*
           cd packages
