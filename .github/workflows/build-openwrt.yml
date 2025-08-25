@@ -82,7 +82,7 @@ jobs:
           echo "检查可用镜像"
           docker images | grep immortalwrt/imagebuilder
 
-      - name: 创建构建脚本
+      - name: 创建构建脚本和 PPPoE 配置
         run: |
           mkdir -p x86-64/24.10
           cat > x86-64/24.10/build.sh <<- 'EOF'
@@ -113,12 +113,7 @@ jobs:
           if [ "$ENABLE_PPPOE" = "yes" ]; then
             PACKAGES="$PACKAGES luci-app-pppoe-server ppp-mod-pppoe"
             mkdir -p files/etc/uci-defaults
-            cat > files/etc/uci-defaults/99-custom.sh <<- EOT
-            uci set network.wan.proto='pppoe'
-            uci set network.wan.username='$PPPOE_ACCOUNT'
-            uci set network.wan.password='$PPPOE_PASSWORD'
-            uci commit network
-            EOT
+            cp /home/build/openwrt/pppoe-config.sh files/etc/uci-defaults/99-custom.sh
             echo "PPPoE 配置文件内容:"
             cat files/etc/uci-defaults/99-custom.sh
           fi
@@ -137,10 +132,24 @@ jobs:
           chmod +x x86-64/24.10/build.sh
           echo "构建脚本内容:"
           cat x86-64/24.10/build.sh
+          
+          # 创建 PPPoE 配置文件（仅在需要时挂载）
+          if [ "${{ inputs.enable_pppoe }}" = "yes" ]; then
+            cat > x86-64/24.10/pppoe-config.sh <<- 'EOT'
+            #!/bin/sh
+            uci set network.wan.proto='pppoe'
+            uci set network.wan.username='$PPPOE_ACCOUNT'
+            uci set network.wan.password='$PPPOE_PASSWORD'
+            uci commit network
+            EOT
+            chmod +x x86-64/24.10/pppoe-config.sh
+            echo "PPPoE 配置文件内容:"
+            cat x86-64/24.10/pppoe-config.sh
+          fi
 
       - name: 验证 PPPoE 输入
         run: |
-          if [ "${{ inputs.enable_pppoe }}" == "yes" ]; then
+          if [ "${{ inputs.enable_pppoe }}" = "yes" ]; then
             if [ -z "${{ inputs.pppoe_account }}" ] || [ -z "${{ inputs.pppoe_password }}" ]; then
               echo "错误: 启用 PPPoE 时必须提供宽带账号和密码！"
               exit 1
@@ -150,10 +159,13 @@ jobs:
       - name: 构建 OpenWrt 固件
         run: |
           echo "构建参数: PROFILE=${{ inputs.profile }}, INCLUDE_DOCKER=${{ inputs.include_docker }}, ENABLE_PPPOE=${{ inputs.enable_pppoe }}"
+          docker_volumes="-v ${{ github.workspace }}/bin:/home/build/openwrt/bin -v ${{ github.workspace }}/x86-64/24.10/build.sh:/home/build/openwrt/build.sh"
+          if [ "${{ inputs.enable_pppoe }}" = "yes" ]; then
+            docker_volumes="$docker_volumes -v ${{ github.workspace }}/x86-64/24.10/pppoe-config.sh:/home/build/openwrt/pppoe-config.sh"
+          fi
           docker run --rm -i \
             --user root \
-            -v "${{ github.workspace }}/bin:/home/build/openwrt/bin" \
-            -v "${{ github.workspace }}/x86-64/24.10/build.sh:/home/build/openwrt/build.sh" \
+            $docker_volumes \
             -e OPENWRT_VERSION="${{ inputs.version }}" \
             -e TARGET="${{ inputs.target }}" \
             -e SUBTARGET="${{ inputs.subtarget }}" \
