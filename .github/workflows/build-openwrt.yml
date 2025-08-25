@@ -1,171 +1,92 @@
-name: Build OpenWrt with ImageBuilder
+name: 构建自定义 OpenWrt 固件
 
 on:
-  workflow_dispatch: # 允许手动触发编译
-  push:
-    branches: [ main ]
-    paths:
-      - '.github/workflows/build-openwrt.yml'
-      - 'config/**'
-
-env:
-  # ############### 核心配置 - 编译前必须修改 ###############
-  OPENWRT_VERSION: "24.10.2" # OpenWrt 版本号
-  TARGET: "x86"              # 设备平台，如 x86, ramips, ath79, sunxi 等
-  SUBTARGET: "64"            # 子目标，如 generic, tiny, nand 等
-  PROFILE: "generic"         # 设备配置文件，如 generic, linksys_wrt1900acs 等
-
-  # ############### 固件定制配置 - 根据喜好修改 ###############
-  # 网络设置
-  LAN_IP: "192.168.6.1"      # 后台管理 IP 地址
-  HOSTNAME: "NIT-OpenWrt"    # 主机名
-
-  # 个性化
-  KERNEL_VERSION: "6.6"      # 内核版本号（仅作为显示，实际版本由 ImageBuilder 决定）
-  BUILD_SIGNATURE: "Built with ❤️ by GitHub Actions" # 个性签名，显示在管理页面
-
-  # 分区大小 (仅对某些平台有效，如 x86)
-  KERNEL_PART_SIZE: "128"    # 内核分区大小 (MB)
-  ROOTFS_PART_SIZE: "1024"   # 系统分区大小 (MB)
-
-  # ############### 软件包配置 ###############
-  # 要包含的额外软件包 (空格分隔)
-  EXTRA_PACKAGES: "luci-app-upnp luci-app-lucky"
-  # 要排除的默认软件包 (空格分隔)
-  EXCLUDE_PACKAGES: ""
+  workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    container:
-      image: openwrtorg/imagebuilder:${{ env.OPENWRT_VERSION }}-${{ env.TARGET }}-${{ env.SUBTARGET }}
-      options: --privileged
 
     steps:
-      - name: Checkout repository
+      - name: 检出代码
         uses: actions/checkout@v4
-        with:
-          path: 'custom-files'
 
-      - name: List ImageBuilder contents
-        run: ls -la
-
-      - name: Setup build configuration
+      - name: 安装依赖
         run: |
-          # 创建自定义文件目录结构
-          mkdir -p files/etc/ files/www/ files/bin/ files/etc/uci-defaults/
+          sudo apt update
+          sudo apt install -y wget tar xz-utils gzip curl jq
 
-          # 1. 准备修改后台IP的UCI默认脚本
-          cat > files/etc/uci-defaults/99-custom-lan-ip << EOF
-          #!/bin/sh
-          uci set network.lan.ipaddr='${{ env.LAN_IP }}'
-          uci commit network
-          exit 0
-          EOF
-          chmod +x files/etc/uci-defaults/99-custom-lan-ip
-
-          # 2. 准备修改主机名的脚本
-          echo "${{ env.HOSTNAME }}" > files/etc/config/hostname
-
-          # 3. 准备个性签名文件 (显示在LuCI首页)
-          echo "${{ env.BUILD_SIGNATURE }}" > files/etc/banner
-
-          # 4. 复制用户可能提供的任何其他自定义文件 (如主题、配置等)
-          if [ -d "custom-files/config/files" ]; then
-            cp -R custom-files/config/files/* files/
-          fi
-
-      - name: Download and prepare custom IPKs
+      - name: 下载 OpenWrt Image Builder
         run: |
-          # 创建目录存放自定义IPK包
-          mkdir -p custom-pkgs
-          cd custom-pkgs
+          VERSION="24.10.0"
+          wget https://downloads.openwrt.org/releases/${VERSION}/targets/x86/64/openwrt-imagebuilder-${VERSION}-x86-64.Linux-x86_64.tar.xz
+          tar -xvf openwrt-imagebuilder-${VERSION}-x86-64.Linux-x86_64.tar.xz
+          mv openwrt-imagebuilder-${VERSION}-x86-64.Linux-x86_64 openwrt-imagebuilder
+          cd openwrt-imagebuilder
 
-          # 定义下载函数
-          download_pkg() {
-            local url=$1
-            local filename=$(basename "$url")
-            echo "Downloading $filename from $url"
-            wget -q --timeout=30 --tries=3 "$url" -O "$filename" && {
-              echo "Download successful: $filename"
-            } || {
-              echo "WARNING: Failed to download $filename, skipping."
-            }
+      - name: 下载第三方 IPK 包
+        run: |
+          cd openwrt-imagebuilder
+          mkdir packages
+          cd packages
+          
+          # 定义函数以下载最新 IPK
+          download_latest_ipk() {
+            REPO=$1
+            PATTERN=$2
+            URL=$(curl -s "https://api.github.com/repos/${REPO}/releases/latest" | jq -r '.assets[] | .browser_download_url' | grep "${PATTERN}")
+            for u in $URL; do
+              wget $u
+            done
           }
+          
+          # luci-theme-argon 和 luci-app-argon-config
+          download_latest_ipk "jerrykuku/luci-theme-argon" "luci-theme-argon_.*_all.ipk"
+          download_latest_ipk "jerrykuku/luci-app-argon-config" "luci-app-argon-config_.*_all.ipk"
+          
+          # luci-app-openclash
+          download_latest_ipk "vernesong/OpenClash" "luci-app-openclash_.*_all.ipk"
+          
+          # luci-app-adguardhome
+          download_latest_ipk "rufengsuixing/luci-app-adguardhome" "luci-app-adguardhome_.*_all.ipk"
+          
+          # luci-app-dockerman
+          download_latest_ipk "lisaac/luci-app-dockerman" "luci-app-dockerman_.*_all.ipk"
+          
+          # luci-app-lucky
+          download_latest_ipk "gdy666/luci-app-lucky" "luci-app-lucky_.*_all.ipk"
+          
+          # luci-app-store (从 iStore 下载最新版本)
+          ISTORE_URL="https://istore.linkease.com/repo/all/packages/"
+          LATEST_STORE=$(curl -s $ISTORE_URL | grep -o 'luci-app-store_git-[^"]*_all.ipk' | sort -V | tail -1)
+          wget "${ISTORE_URL}${LATEST_STORE}"
+          
+          # luci-app-quickstart 无预编译 IPK，需使用 SDK 构建，暂时跳过
+          
+          cd ..
 
-          # 下载 luci-theme-argon (从 snapshot 仓库获取最新版)
-          # 注意：版本号可能需要根据 OPENWRT_VERSION 调整
-          THEME_VER="2.3.2"
-          download_pkg "https://github.com/jerrykuku/luci-theme-argon/releases/download/v${THEME_VER}/luci-theme-argon_${THEME_VER}_all.ipk"
-
-          # 尝试下载 OpenClash (注意架构匹配)
-          # 这是一个复杂的过程，通常需要内核模块，这里提供一个示例链接，很可能需要根据实际情况修改
-          # download_pkg "https://github.com/vernesong/OpenClash/releases/download/v0.45.78-beta/luci-app-openclash_0.45.78-beta_all.ipk"
-
-          # 下载 AdGuardHome
-          download_pkg "https://github.com/rufengsuixing/luci-app-adguardhome/releases/download/v1.8-27/luci-app-adguardhome_1.8-27_all.ipk"
-
-          # 下载 quickstart
-          download_pkg "https://github.com/lq-wq/luci-app-quickstart/releases/download/v1.2.2/luci-app-quickstart_1.2.2_all.ipk"
-
-          # 下载 dockerman
-          download_pkg "https://github.com/lisaac/luci-app-dockerman/releases/download/v0.5.36/luci-app-dockerman_0.5.36_all.ipk"
-
-          # 下载 nikki (示例链接，可能需要替换)
-          # download_pkg "https://github.com/nikkinikki-org/OpenWrt-nikki/releases/download/v1.0/luci-app-nikki_1.0_all.ipk"
-
-          # 下载 luci-app-store (通过脚本安装，这里只下载脚本)
-          wget -q https://github.com/linkease/openwrt-app-actions/raw/main/applications/luci-app-systools/root/usr/share/systools/istore-reinstall.run -O istore-reinstall.run
-          chmod +x istore-reinstall.run
-
-          echo "Custom IPKs prepared:"
-          ls -la
-
-      - name: Build image
+      - name: 创建本地软件源
         run: |
-          # 构建命令
-          # FILES: 包含我们创建的 files 目录
-          # BIN_DIR: 输出固件目录
-          # PACKAGES: 要包含的软件包列表
-          # DISABLED_SERVICES: 要禁用的服务
+          cd openwrt-imagebuilder
+          bin/opkg-make-index ./packages > ./packages/Packages
+          gzip -9c ./packages/Packages > ./packages/Packages.gz
+          cp ../custom_repositories.conf repositories.conf
 
-          # 组合PACKAGES列表
-          MY_PACKAGES="luci luci-ssl-openssl luci-theme-argon ${{ env.EXTRA_PACKAGES }}"
+      - name: 复制自定义配置文件
+        run: |
+          cd openwrt-imagebuilder
+          cp -r ../custom_files files
 
-          # 组合排除列表
-          MY_EXCLUDES="${{ env.EXCLUDE_PACKAGES }}"
+      - name: 构建固件
+        run: |
+          cd openwrt-imagebuilder
+          make image PROFILE="generic" \
+            PACKAGES="$(cat ../packages.conf)" \
+            FILES="files/" \
+            ROOTFS_PARTSIZE=$(grep ROOTFS_PARTSIZE ../config.sh | cut -d'=' -f2)
 
-          echo "Package list: $MY_PACKAGES"
-          echo "Exclude list: $MY_EXCLUDES"
-
-          # 运行 make image
-          make image \
-            FILES="files" \
-            BIN_DIR="../output" \
-            PACKAGES="$MY_PACKAGES" \
-            EXTRA_IMAGE_NAME="${{ github.run_number }}" \
-            DISABLED_SERVICES=""
-
-          # 尝试安装我们下载的IPK（更可靠的方法是先上传到自己的服务器，然后在make命令中引用）
-          # 这里作为高级用法，暂时注释掉，因为依赖关系复杂
-          # for ipk in ../custom-pkgs/*.ipk; do
-          #   echo "Installing $ipk into image..."
-          #   # 这是一个非常高级的操作，需要解包repack固件，通常不建议在ImageBuilder中这样做
-          # done
-
-      - name: Store artifacts
+      - name: 上传固件
         uses: actions/upload-artifact@v4
         with:
-          name: openwrt-images-${{ env.TARGET }}-${{ env.SUBTARGET }}-${{ env.PROFILE }}
-          path: output/
-          retention-days: 7
-
-      - name: Show build info
-        run: |
-          echo "=== Build Summary ==="
-          echo "OpenWrt Version: ${{ env.OPENWRT_VERSION }}"
-          echo "Target: ${{ env.TARGET }}/${{ env.SUBTARGET }} (${{ env.PROFILE }})"
-          echo "Management IP: ${{ env.LAN_IP }}"
-          echo "Hostname: ${{ env.HOSTNAME }}"
-          echo "Build Signature: ${{ env.BUILD_SIGNATURE }}"
-          echo "========================="
+          name: openwrt-firmware
+          path: openwrt-imagebuilder/bin/targets/x86/64/*.img.gz
