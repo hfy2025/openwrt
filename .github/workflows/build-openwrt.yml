@@ -85,7 +85,7 @@ jobs:
       - name: 创建构建脚本
         run: |
           mkdir -p x86-64/24.10
-          cat << 'EOF' > x86-64/24.10/build.sh
+          cat > x86-64/24.10/build.sh <<- 'EOF'
           #!/bin/bash
           set -e
           echo "当前目录: $(pwd)"
@@ -113,7 +113,7 @@ jobs:
           if [ "$ENABLE_PPPOE" = "yes" ]; then
             PACKAGES="$PACKAGES pppoe"
             mkdir -p files/etc/uci-defaults
-            cat << EOT > files/etc/uci-defaults/99-custom.sh
+            cat > files/etc/uci-defaults/99-custom.sh <<- EOT
             uci set network.wan.proto='pppoe'
             uci set network.wan.username='$PPPOE_ACCOUNT'
             uci set network.wan.password='$PPPOE_PASSWORD'
