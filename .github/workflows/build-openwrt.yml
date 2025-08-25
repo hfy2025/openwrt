@@ -10,7 +10,7 @@ on:
       target:
         description: '目标架构 (x86)'
         required: true
-weil        default: 'x86'
+        default: 'x86'
       subtarget:
         description: '子目标 (64)'
         required: true
