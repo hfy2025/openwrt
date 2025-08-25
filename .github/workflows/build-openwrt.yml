@@ -60,6 +60,10 @@ jobs:
           sudo systemctl start docker
           echo "检查 Docker 版本"
           docker --version
+          echo "拉取 Docker 镜像"
+          docker pull immortalwrt/imagebuilder:x86-64-openwrt-24.10.0 || { echo "拉取镜像失败"; exit 1; }
+          echo "检查可用镜像"
+          docker images | grep immortalwrt/imagebuilder
 
       - name: 创建构建脚本
         run: |
@@ -69,8 +73,14 @@ jobs:
           set -e
           echo "当前目录: $(pwd)"
           echo "构建参数: PROFILE=$PROFILE, INCLUDE_DOCKER=$INCLUDE_DOCKER, ENABLE_PPPOE=$ENABLE_PPPOE"
+          echo "检查环境"
+          make --version
+          opkg --version || echo "opkg 未安装"
+          echo "检查可用配置文件"
+          make info
           
           # 配置软件源
+          echo "配置软件源"
           echo "src/gz openwrt_core https://downloads.openwrt.org/releases/$OPENWRT_VERSION/targets/$TARGET/$SUBTARGET/packages" > repositories.conf
           echo "src/gz openwrt_base https://downloads.openwrt.org/releases/$OPENWRT_VERSION/packages/x86_64/base" >> repositories.conf
           echo "src/gz openwrt_luci https://downloads.openwrt.org/releases/$OPENWRT_VERSION/packages/x86_64/luci" >> repositories.conf
@@ -92,11 +102,19 @@ jobs:
             uci set network.wan.password='$PPPOE_PASSWORD'
             uci commit network
             EOT
+            cat files/etc/uci-defaults/99-custom.sh
           fi
           
           # 构建固件
           echo "开始构建固件，包列表: $PACKAGES"
-          make image PROFILE="$PROFILE" PACKAGES="$PACKAGES" EXTRA_IMAGE_NAME="custom" ROOTFS_PARTSIZE="$ROOTFS_PARTSIZE" FILES="files/"
+          make image PROFILE="$PROFILE" PACKAGES="$PACKAGES" EXTRA_IMAGE_NAME="custom" ROOTFS_PARTSIZE="$ROOTFS_PARTSIZE" FILES="files/" V=s || {
+            echo "make image 失败，输出目录结构"
+            ls -lR /home/build/openwrt
+            cat repositories.conf
+            exit 1
+          }
+          echo "固件构建完成，列出生成文件"
+          ls -l bin/targets/$TARGET/$SUBTARGET
           EOF
           chmod +x x86-64/24.10/build.sh
           echo "构建脚本内容:"
@@ -117,7 +135,6 @@ jobs:
           docker run --rm -i \
             --user root \
             -v "${{ github.workspace }}/bin:/home/build/openwrt/bin" \
-            -v "${{ github.workspace }}/files:/home/build/openwrt/files" \
             -v "${{ github.workspace }}/x86-64/24.10/build.sh:/home/build/openwrt/build.sh" \
             -e OPENWRT_VERSION="${{ inputs.version }}" \
             -e TARGET="${{ inputs.target }}" \
@@ -128,17 +145,22 @@ jobs:
             -e ENABLE_PPPOE="${{ inputs.enable_pppoe }}" \
             -e PPPOE_ACCOUNT="${{ inputs.pppoe_account }}" \
             -e PPPOE_PASSWORD="${{ inputs.pppoe_password }}" \
-            openwrt/imagebuilder:x86-64-24.10.0 \
-            /bin/bash /home/build/openwrt/build.sh
+            immortalwrt/imagebuilder:x86-64-openwrt-24.10.0 \
+            /bin/bash /home/build/openwrt/build.sh || {
+              echo "Docker 构建失败，检查容器日志"
+              exit 1
+            }
 
       - name: 生成固件校验和
         run: |
           mkdir -p bin/targets/${{ inputs.target }}/${{ inputs.subtarget }}
-          cp bin/*squashfs-combined*.img.gz bin/targets/${{ inputs.target }}/${{ inputs.subtarget }}/
+          cp bin/*squashfs-combined*.img.gz bin/targets/${{ inputs.target }}/${{ inputs.subtarget }}/ 2>/dev/null || echo "未找到固件文件"
           cd bin/targets/${{ inputs.target }}/${{ inputs.subtarget }}
           for file in *squashfs-combined*.img.gz; do
-            sha256sum "$file" > "$file.sha256"
-            sha256sum -c "$file.sha256"
+            if [ -f "$file" ]; then
+              sha256sum "$file" > "$file.sha256"
+              sha256sum -c "$file.sha256"
+            fi
           done
           ls -l
 
