@@ -34,7 +34,9 @@ jobs:
       - name: 安装依赖工具
         run: |
           sudo apt-get update
-          sudo apt-get install -y zstd build-essential libncurses5-dev gawk git gettext make gcc g++ unzip file python3 python3-distutils
+          sudo apt-get install -y zstd build-essential libncurses5-dev gawk git gettext make gcc g++ unzip file python3
+          echo "检查已安装的包"
+          dpkg -l | grep -E 'zstd|build-essential|libncurses5-dev|gawk|git|gettext|make|gcc|g\+\+|unzip|file|python3'
 
       - name: 下载 OpenWrt 镜像构建工具
         run: |
@@ -69,7 +71,7 @@ jobs:
           download_latest_ipk() {
             PACKAGE="$1"
             PATTERN="$2"
-            BASE_URL="https://dl.openwrt.ai/releases/24.10/packages/x86_64/kiddin9/"
+            BASE_URL="https://dl.openwrt.ai/releases/${{ inputs.version }}/packages/x86_64/kiddin9/"
             HTML=$(curl -s "$BASE_URL")
             LATEST=$(echo "$HTML" | grep -o 'href="[^"]*\.ipk"' | sed 's/href="//;s/"$//' | grep -E "$PATTERN" | sort -V | tail -1)
             if [ -n "$LATEST" ]; then
@@ -113,7 +115,7 @@ jobs:
             exit 1
           fi
           echo "执行 make defconfig"
-          make defconfig || { echo "make defconfig 失败"; ls -l; exit 1; }
+          make defconfig V=99 || { echo "make defconfig 失败"; ls -l; exit 1; }
 
       - name: 构建自定义固件
         working-directory: ./openwrt-imagebuilder-${{ inputs.version }}-${{ inputs.target }}-${{ inputs.subtarget }}.Linux-x86_64
