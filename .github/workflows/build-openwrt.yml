@@ -1,40 +1,59 @@
-name: 构建自定义 OpenWrt 固件
+name: 构建 OpenWrt 固件
 
 on:
   workflow_dispatch:
+    inputs:
+      version:
+        description: 'OpenWrt 版本号 (如 24.10.2)'
+        required: true
+        default: '24.10.2'
+      target:
+        description: '目标架构 (如 x86)'
+        required: true
+        default: 'x86'
+      subtarget:
+        description: '子目标 (如 64)'
+        required: true
+        default: '64'
+      profile:
+        description: '设备配置文件 (如 generic)'
+        required: true
+        default: 'generic'
+      rootfs_size:
+        description: '根文件系统分区大小 (MiB, 如 256)'
+        required: true
+        default: '256'
 
 jobs:
-  build:
+  build_job:
     runs-on: ubuntu-latest
-
     steps:
-      - name: 检出代码
+      - name: 检出代码仓库
         uses: actions/checkout@v4
 
-      - name: 安装依赖
+      - name: 安装依赖工具
         run: |
-          sudo apt update
-          sudo apt install -y wget tar xz-utils gzip curl jq zstd
+          sudo apt-get update
+          sudo apt-get install -y zstd build-essential libncurses5-dev gawk git gettext
 
-      - name: 清理工作目录
+      - name: 下载 OpenWrt 镜像构建工具
         run: |
-          rm -rf openwrt-imagebuilder
+          URL="https://downloads.openwrt.org/releases/${{ inputs.version }}/targets/${{ inputs.target }}/${{ inputs.subtarget }}/openwrt-imagebuilder-${{ inputs.version }}-${{ inputs.target }}-${{ inputs.subtarget }}.Linux-x86_64.tar.zst"
+          echo "正在下载 Image Builder: $URL"
+          wget $URL || { echo "主服务器下载失败，尝试镜像服务器"; wget "http://mirror2.openwrt.org/releases/${{ inputs.version }}/targets/${{ inputs.target }}/${{ inputs.subtarget }}/openwrt-imagebuilder-${{ inputs.version }}-${{ inputs.target }}-${{ inputs.subtarget }}.Linux-x86_64.tar.zst" || { echo "镜像服务器也失败，请检查 URL 或网络"; exit 1; }; }
+          echo "解压 zst 文件"
+          zstd -d *.tar.zst || { echo "zstd 解压失败"; exit 1; }
+          echo "解压 tar 文件"
+          tar -xvf *.tar || { echo "tar 解压失败"; exit 1; }
+          echo "列出当前目录内容"
+          ls -l
+          echo "进入 Image Builder 目录"
+          IMAGE_BUILDER_DIR="openwrt-imagebuilder-${{ inputs.version }}-${{ inputs.target }}-${{ inputs.subtarget }}.Linux-x86_64"
+          echo "目标目录: $IMAGE_BUILDER_DIR"
+          cd "$IMAGE_BUILDER_DIR" || { echo "进入 Image Builder 目录失败，目录名可能不正确"; ls -l; exit 1; }
 
-      - name: 下载 OpenWrt Image Builder
-        run: |
-          VERSION="24.10.1"
-          curl -f --connect-timeout 20 --retry 5 --location -o openwrt-imagebuilder-${VERSION}-x86-64.Linux-x86_64.tar.zst https://downloads.openwrt.org/releases/24.10.1/targets/x86/64/openwrt-imagebuilder-24.10.1-x86-64.Linux-x86_64.tar.zst
-          zstd -d openwrt-imagebuilder-${VERSION}-x86-64.Linux-x86_64.tar.zst -o openwrt-imagebuilder-${VERSION}-x86-64.Linux-x86_64.tar
-          tar -xvf openwrt-imagebuilder-${VERSION}-x86-64.Linux-x86_64.tar
-          mv openwrt-imagebuilder-${VERSION}-x86-64.Linux-x86_64 openwrt-imagebuilder
-          cd openwrt-imagebuilder
-          if [ ! -f bin/opkg-make-index ]; then
-            echo "Error: bin/opkg-make-index not found in openwrt-imagebuilder"
-            ls -la bin/
-            exit 1
-          fi
-
-      - name: 下载第三方 IPK 包
+      - name: 下载第三方插件包
+        working-directory: ./openwrt-imagebuilder-${{ inputs.version }}-${{ inputs.target }}-${{ inputs.subtarget }}.Linux-x86_64
         run: |
           cd openwrt-imagebuilder
           mkdir -p packages
@@ -67,30 +86,23 @@ jobs:
           download_latest_ipk "kmod-ipt-fullconenat" "kmod-ipt-fullconenat_.*_x86_64\.ipk"
           cd ..
 
-      - name: 创建本地软件源
+      - name: 更新软件源并添加自定义源
+        working-directory: ./openwrt-imagebuilder-${{ inputs.version }}-${{ inputs.target }}-${{ inputs.subtarget }}.Linux-x86_64
         run: |
-          cd openwrt-imagebuilder
-          chmod +x bin/opkg-make-index
-          bin/opkg-make-index ./packages > ./packages/Packages
-          gzip -9c ./packages/Packages > ./packages/Packages.gz
-          cp ../custom_repositories.conf repositories.conf
+          echo "src/gz openwrt_luci https://downloads.openwrt.org/releases/${{ inputs.version }}/packages/${{ inputs.target }}/luci" >> repositories.conf
+          echo "src/gz custom_packages file://${PWD}/packages" >> repositories.conf
+          cat repositories.conf
+          make defconfig || { echo "make defconfig 失败"; exit 1; }
 
-      - name: 复制自定义配置文件
+      - name: 构建自定义固件
+        working-directory: ./openwrt-imagebuilder-${{ inputs.version }}-${{ inputs.target }}-${{ inputs.subtarget }}.Linux-x86_64
         run: |
-          cd openwrt-imagebuilder
-          cp -r ../custom_files files
-
-      - name: 构建固件
-        run: |
-          cd openwrt-imagebuilder
-          make image PROFILE="generic" \
-            PACKAGES="$(cat ../packages.conf)" \
-            FILES="files/" \
-            ROOTFS_PARTSIZE=$(grep ROOTFS_PARTSIZE ../config.sh | cut -d'=' -f2)
+          PACKAGES="luci luci-theme-argon luci-app-openclash luci-app-adguardhome luci-app-quickstart luci-app-dockerman luci-app-nikki luci-app-store luci-app-upnp luci-app-lucky adguardhome dnsmasq-full -dnsmasq"
+          echo "开始构建固件，包列表: $PACKAGES"
+          make image PROFILE="${{ inputs.profile }}" PACKAGES="$PACKAGES" FILES="../files/" EXTRA_IMAGE_NAME="自定义" ROOTFS_PARTSIZE="${{ inputs.rootfs_size }}" || { echo "构建固件失败"; exit 1; }
 
       - name: 上传固件
         uses: actions/upload-artifact@v4
         with:
-          name: openwrt-firmware
-          path: openwrt-imagebuilder/bin/targets/x86/64/*.img.gz
-```
+          name: openwrt-固件
+          path: ./openwrt-imagebuilder-${{ inputs.version }}-${{ inputs.target }}-${{ inputs.subtarget }}.Linux-x86_64/bin/targets/${{ inputs.target }}/${{ inputs.subtarget }}/*
