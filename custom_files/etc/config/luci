@@ -1,0 +1,4 @@
+# 设置默认主题（luci-theme-argon）
+
+config core 'main'
+    option mediaurlbase '/luci-static/argon'
