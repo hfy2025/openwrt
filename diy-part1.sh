@@ -1,18 +1,12 @@
-#!/bin/bash
-#
-# diy-part1.sh
-# Description: Update feeds and add custom sources
-#
+# Add third-party feeds for extended packages
+# Kenzok8 (OpenClash, Nikki, HomeProxy, etc.)
+echo 'src-git kenzo https://github.com/kenzok8/openwrt-packages' >> feeds.conf.default
+echo 'src-git small https://github.com/kenzok8/small' >> feeds.conf.default
 
-# 1. Add Custom Feeds (User Defined)
-src-git packages https://github.com/coolsnowwolf/packages
-src-git luci https://github.com/coolsnowwolf/luci
-src-git routing https://github.com/coolsnowwolf/routing
-src-git telephony https://github.com/openwrt/telephony
+# iStore and NAS packages (Quickstart, iStore)
+echo 'src-git istore https://github.com/linkease/istore;main' >> feeds.conf.default
+echo 'src-git nas https://github.com/linkease/nas-packages.git;master' >> feeds.conf.default
 
-# 2. Add AdGuardHome Source (Requirement 10)
-echo 'src-git adguardhome https://github.com/rufengsuixing/luci-app-adguardhome' >>feeds.conf.default
-
-# 3. Update feeds
-# ./scripts/feeds update -a
-# ./scripts/feeds install -a
+# Argon Theme (Manual Clone)
+git clone https://github.com/jerrykuku/luci-theme-argon.git package/luci-theme-argon
+git clone https://github.com/jerrykuku/luci-app-argon-config.git package/luci-app-argon-config
