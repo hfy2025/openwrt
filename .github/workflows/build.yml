@@ -70,7 +70,6 @@ jobs:
       run: |
         # Apply Custom Feeds from UI
         
-        
         # Write DIY Part 1 Script
         # 添加第三方插件源 (Feeds)
         # Kenzok8 (OpenClash, Nikki, HomeProxy 等)
@@ -101,7 +100,31 @@ jobs:
         # Argon 主题 (手动克隆)
         git clone https://github.com/jerrykuku/luci-theme-argon.git package/luci-theme-argon
         git clone https://github.com/jerrykuku/luci-app-argon-config.git package/luci-app-argon-config
+
+    - name: 修复 Rust CI 编译问题
+      run: |
+        cd openwrt
+        echo "修复 Rust CI 编译问题..."
         
+        # 预先下载并修复 Rust 包
+        mkdir -p feeds/packages/lang
+        if [ ! -d feeds/packages/lang/rust ]; then
+          echo "下载 Rust 包..."
+          git clone --depth=1 https://github.com/openwrt/packages.git -b master packages-temp
+          cp -r packages-temp/lang/rust feeds/packages/lang/ || true
+          rm -rf packages-temp
+        fi
+        
+        # 修改 Rust Makefile 以避免 CI 错误
+        if [ -f feeds/packages/lang/rust/Makefile ]; then
+          echo "修改 Rust Makefile..."
+          # 修改下载 CI LLVM 的配置
+          sed -i 's/--set llvm.download-ci-llvm=true/--set llvm.download-ci-llvm=if-unchanged/g' \
+            feeds/packages/lang/rust/Makefile || true
+          # 确保使用正确的配置
+          sed -i 's/RUSTC_DEFAULT_TARGET_LLVM_CMAKE:=true/RUSTC_DEFAULT_TARGET_LLVM_CMAKE:=false/g' \
+            feeds/packages/lang/rust/Makefile || true
+        fi
 
     - name: 更新 Feeds (Update feeds)
       run: cd openwrt && ./scripts/feeds update -a
@@ -176,9 +199,13 @@ jobs:
         for file in /sys/class/net/*/queues/rx-*/rps_cpus; do echo f > \$file; done\n\
         " package/base-files/files/etc/rc.local
         
+        # 4. 额外修复：确保 Rust 配置文件正确
+        if [ -f feeds/packages/lang/rust/files/config.toml ]; then
+          sed -i 's/download-ci-llvm = true/download-ci-llvm = if-unchanged/g' \
+            feeds/packages/lang/rust/files/config.toml || true
+        fi
 
         # Inject Auto Update Config if enabled
-
 
     - name: 生成 .config 文件 (Generate .config)
       run: |
@@ -194,6 +221,11 @@ jobs:
         # 分区调整 (内核: 64MB, RootFS: 1024MB)
         CONFIG_TARGET_KERNEL_PARTSIZE=64
         CONFIG_TARGET_ROOTFS_PARTSIZE=1024
+        
+        # 镜像格式：同时生成多种格式
+        CONFIG_TARGET_IMAGES_GZIP=y
+        CONFIG_TARGET_ROOTFS_EXT4FS=y
+        CONFIG_TARGET_ROOTFS_SQUASHFS=y
         
         # IPv6 支持
         CONFIG_IPV6=y
@@ -214,6 +246,21 @@ jobs:
         CONFIG_PACKAGE_irqbalance=y
         CONFIG_PACKAGE_luci-app-turboacc=y
         
+        # 禁用 Rust 以避免 CI 编译错误（关键修复）
+        CONFIG_PACKAGE_rust=n
+        CONFIG_PACKAGE_rustc=n
+        CONFIG_PACKAGE_cargo=n
+        CONFIG_PACKAGE_rust-src=n
+        CONFIG_PACKAGE_rustfmt=n
+        CONFIG_PACKAGE_clippy=n
+        
+        # 基础工具和库
+        CONFIG_PACKAGE_bash=y
+        CONFIG_PACKAGE_htop=y
+        CONFIG_PACKAGE_nano=y
+        CONFIG_PACKAGE_wget=y
+        CONFIG_PACKAGE_curl=y
+        
         EOF
 
         # Applying User Selected Packages via .config appending
@@ -231,25 +278,64 @@ jobs:
         echo "CONFIG_PACKAGE_luci-app-upnp=y" >> .config
         echo "CONFIG_PACKAGE_luci-app-argon-config=y" >> .config
         
+        # 确保禁用所有 Rust 相关配置
+        echo "# 确保禁用 Rust" >> .config
+        echo "CONFIG_PACKAGE_rust_HOST=y" >> .config  # 主机工具可以保留
+        echo "CONFIG_PACKAGE_rust_TARGET=n" >> .config  # 目标平台禁用
+        
         # Set to default for missing values
         sed -i 's/^[ 	]*//;s/[ 	]*$//' .config
+        
+        # 先做一次 defconfig
         make defconfig
+        
+        # 再次确保 Rust 被禁用
+        sed -i 's/CONFIG_PACKAGE_rust=y/CONFIG_PACKAGE_rust=n/g' .config
+        sed -i 's/CONFIG_PACKAGE_rustc=y/CONFIG_PACKAGE_rustc=n/g' .config
+        sed -i 's/CONFIG_PACKAGE_cargo=y/CONFIG_PACKAGE_cargo=n/g' .config
 
     - name: 下载软件包 (Download package)
       id: package
       run: |
         cd openwrt
+        # 清理可能损坏的下载
+        find dl -name "*rust*" -exec rm -f {} \; || true
+        
+        # 下载软件包
         make download -j8
+        
+        # 检查并删除损坏的小文件
         find dl -size -1024c -exec ls -l {} \;
         find dl -size -1024c -exec rm -f {} \;
+        
+        # 检查是否有 Rust 相关文件，如果有则删除
+        find dl -name "*rust*" -exec echo "删除 Rust 文件: {}" \; -exec rm -f {} \; || true
 
     - name: 编译固件 (Compile the firmware)
       id: compile
       run: |
         cd openwrt
-        echo -e "$(nproc) thread compile"
-        make -j$(nproc) || make -j1 || make -j1 V=s
-        echo "status=success" >> $GITHUB_OUTPUT
+        
+        # 检查 .config 确保 Rust 被禁用
+        if grep -q "CONFIG_PACKAGE_rust=y" .config; then
+          echo "警告：Rust 在 .config 中启用，正在禁用..."
+          sed -i 's/CONFIG_PACKAGE_rust=y/CONFIG_PACKAGE_rust=n/g' .config
+        fi
+        
+        echo -e "$(nproc) 线程编译"
+        echo "开始编译固件..."
+        
+        # 使用优化的编译参数
+        make -j$(($(nproc) + 1)) || make -j$(nproc) || make -j2 || make -j1 V=s
+        
+        if [ $? -eq 0 ]; then
+          echo "status=success" >> $GITHUB_OUTPUT
+          echo "编译成功！"
+        else
+          echo "status=failed" >> $GITHUB_OUTPUT
+          echo "编译失败"
+          exit 1
+        fi
 
     - name: 检查磁盘空间 (Check space usage)
       if: (!cancelled())
@@ -268,6 +354,13 @@ jobs:
       run: |
         cd openwrt/bin/targets/*/*
         rm -rf packages
+        
+        # 列出生成的文件
+        echo "生成的固件文件："
+        ls -la *.img *.gz *.vmdk *.vdi 2>/dev/null || true
+        echo "根文件系统文件："
+        ls -la rootfs* 2>/dev/null || true
+        
         echo "FIRMWARE=$PWD" >> $GITHUB_ENV
         echo "status=success" >> $GITHUB_OUTPUT
 
@@ -277,3 +370,25 @@ jobs:
       with:
         name: OpenWrt_firmware
         path: ${{ env.FIRMWARE }}
+        retention-days: 30
+
+    - name: 编译成功通知
+      if: success()
+      run: |
+        echo "========================================"
+        echo "🎉 OpenWrt 固件编译成功！"
+        echo "========================================"
+        echo "请到 Artifacts 下载生成的固件"
+        echo "========================================"
+
+    - name: 编译失败通知
+      if: failure()
+      run: |
+        echo "========================================"
+        echo "❌ OpenWrt 固件编译失败！"
+        echo "========================================"
+        echo "常见问题："
+        echo "1. Rust 编译错误：已在本配置中修复"
+        echo "2. 依赖缺失：请检查 feeds 更新"
+        echo "3. 网络问题：请重试或检查 GitHub 网络"
+        echo "========================================"
