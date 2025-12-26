@@ -1,16 +1,16 @@
-name: Build OpenWrt x86-64
+name: Build OpenWrt
 
 on:
   workflow_dispatch:
-    inputs:
-      version:
-        description: '固件版本号'
-        required: true
-        default: 'v1.0'
   push:
     branches: [ main ]
   schedule:
     - cron: '0 2 * * 0'
+
+env:
+  REPO_URL: https://github.com/openwrt/openwrt.git
+  REPO_BRANCH: openwrt-24.10
+  TARGET: x86/64
 
 jobs:
   build:
@@ -21,7 +21,18 @@ jobs:
     - name: 检出代码
       uses: actions/checkout@v4
 
-    - name: 设置构建环境
+    - name: 设置环境变量
+      run: |
+        echo "BUILD_DATE=$(date +'%Y%m%d-%H%M%S')" >> $GITHUB_ENV
+        echo "COMMIT_HASH=$(git rev-parse --short HEAD)" >> $GITHUB_ENV
+
+    - name: 查看工作目录
+      run: |
+        echo "当前工作目录:"
+        pwd
+        ls -la
+
+    - name: 准备构建环境
       run: |
         sudo apt-get update
         sudo apt-get install -y build-essential clang flex bison g++ gawk gcc-multilib g++-multilib \
@@ -30,17 +41,27 @@ jobs:
 
     - name: 克隆 OpenWrt 源码
       run: |
-        git clone https://github.com/openwrt/openwrt.git -b openwrt-24.10 --depth 1
+        git clone ${{ env.REPO_URL }} -b ${{ env.REPO_BRANCH }} --depth 1
         cd openwrt
         echo "OpenWrt 版本:"
         git log --oneline -1
 
-    - name: 应用自定义脚本
+    - name: 应用基础配置
       run: |
         cd openwrt
         
         # 复制配置文件
-        cp ../X86-64.config .config 2>/dev/null || echo "使用默认配置"
+        if [ -f ../X86-64.config ]; then
+          echo "使用自定义配置文件"
+          cp ../X86-64.config .config
+        else
+          echo "使用默认配置"
+          make defconfig
+        fi
+
+    - name: 执行自定义脚本
+      run: |
+        cd openwrt
         
         # 执行 diy-part1.sh
         if [ -f ../diy-part1.sh ]; then
@@ -57,61 +78,116 @@ jobs:
           cp ../diy-part2.sh .
           ./diy-part2.sh
         fi
+        
+        # 复制 feeds 配置
+        if [ -f ../feeds.conf.default ]; then
+          cp ../feeds.conf.default .
+        fi
 
     - name: 更新 feeds
       run: |
         cd openwrt
-        
-        # 使用自定义 feeds 配置
-        if [ -f ../feeds.conf.default ]; then
-          cp ../feeds.conf.default .
-        fi
-        
         ./scripts/feeds update -a
         ./scripts/feeds install -a
 
-    - name: 配置编译
+    - name: 最终配置
       run: |
         cd openwrt
         make defconfig
-        echo "配置完成"
+        echo "最终配置摘要:"
+        echo "目标: ${{ env.TARGET }}"
+        grep -E "CONFIG_TARGET|CONFIG_KERNEL" .config || true
 
-    - name: 下载依赖
+    - name: 下载依赖包
       run: |
         cd openwrt
-        echo "开始下载依赖包..."
+        echo "下载依赖包..."
         make -j$(nproc) download
-        echo "清理无效下载文件..."
+        echo "清理无效下载..."
         find dl -size -1024c -delete 2>/dev/null || true
 
     - name: 编译固件
       run: |
         cd openwrt
         export FORCE_UNSAFE_CONFIGURE=1
-        echo "开始编译固件..."
-        make -j$(nproc) V=s
+        echo "开始编译..."
+        make -j$(nproc) V=s 2>&1 | tee build.log
+        
+        # 检查编译是否成功
+        if [ $? -eq 0 ]; then
+          echo "编译成功!"
+        else
+          echo "编译失败!"
+          exit 1
+        fi
 
     - name: 检查编译结果
       run: |
         cd openwrt
-        echo "编译结果:"
-        ls -lh bin/targets/x86/64/ || echo "编译输出目录不存在"
+        echo "检查固件文件..."
+        
+        # 检查固件文件是否存在
+        if [ -d "bin/targets/${{ env.TARGET }}" ]; then
+          echo "固件目录内容:"
+          ls -la bin/targets/${{ env.TARGET }}/
+          
+          echo "固件文件:"
+          find bin/targets/${{ env.TARGET }} -name "*.img" -o -name "*.img.gz" -o -name "*.vmdk" -o -name "*.vdi" | head -10
+          
+          # 检查文件大小
+          echo "文件大小:"
+          find bin/targets/${{ env.TARGET }} -name "*.img" -exec du -h {} \; 2>/dev/null || true
+          find bin/targets/${{ env.TARGET }} -name "*.img.gz" -exec du -h {} \; 2>/dev/null || true
+          
+          # 统计文件数量
+          echo "文件数量:"
+          find bin/targets/${{ env.TARGET }} -type f | wc -l
+        else
+          echo "错误: 固件目录不存在!"
+          echo "当前目录内容:"
+          pwd
+          ls -la
+          echo "bin目录内容:"
+          ls -la bin/ 2>/dev/null || echo "bin目录不存在"
+        fi
 
-    - name: 上传固件
+    - name: 准备上传文件
+      run: |
+        cd openwrt
+        
+        # 创建上传目录
+        mkdir -p /tmp/upload
+        
+        # 复制固件文件
+        if [ -d "bin/targets/${{ env.TARGET }}" ]; then
+          echo "复制固件文件..."
+          cp -r bin/targets/${{ env.TARGET }}/* /tmp/upload/ 2>/dev/null || true
+        fi
+        
+        # 复制重要文件
+        cp .config /tmp/upload/ 2>/dev/null || true
+        cp feeds.conf.default /tmp/upload/ 2>/dev/null || true
+        cp build.log /tmp/upload/ 2>/dev/null || true
+        
+        echo "上传目录内容:"
+        ls -la /tmp/upload/
+
+    - name: 上传固件文件
       uses: actions/upload-artifact@v4
       if: success()
       with:
-        name: OpenWrt-x86-64-固件
-        path: openwrt/bin/targets/x86/64/*
+        name: openwrt-firmware-${{ env.BUILD_DATE }}
+        path: /tmp/upload/*
         retention-days: 7
+        if-no-files-found: error
 
-    - name: 上传配置和日志
+    - name: 上传日志文件
       uses: actions/upload-artifact@v4
       if: always()
       with:
-        name: 编译配置和日志
+        name: build-logs-${{ env.BUILD_DATE }}
         path: |
-          openwrt/.config
-          openwrt/feeds.conf.default
           openwrt/build.log
+          openwrt/.config
         retention-days: 3
+        if-no-files-found: ignore
