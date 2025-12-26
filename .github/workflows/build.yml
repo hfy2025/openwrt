@@ -46,159 +46,124 @@ jobs:
     needs: prepare
     runs-on: ubuntu-22.04
     timeout-minutes: 180
-    container:
-      image: openwrtorg/sdk:x86_64-24.10
-      options: --user root --privileged --network host
 
     steps:
-    - name: 检查容器环境
+    - name: 检查环境
       run: |
-        echo "容器信息:"
+        echo "工作空间: ${{ github.workspace }}"
+        echo "运行器信息:"
         uname -a
         echo "内存:"
         free -h
         echo "磁盘:"
         df -h
-        echo "CPU信息:"
-        cat /proc/cpuinfo | grep "model name" | head -1
 
     - name: 检出仓库代码
       uses: actions/checkout@v4
       with:
-        path: ${{ github.workspace }}/config
+        path: openwrt-config
 
-    - name: 设置构建环境
+    - name: 设置 Docker 容器环境
       run: |
-        echo "设置构建参数..."
-        export BUILDER_UID=$(id -u)
-        export BUILDER_GID=$(id -g)
-        echo "用户: $BUILDER_UID:$BUILDER_GID"
+        echo "准备 Docker 环境..."
 
-    - name: 克隆 OpenWrt 源码
-      run: |
-        echo "开始克隆 OpenWrt 源码..."
-        cd ${{ github.workspace }}
-        git clone --depth=1 ${{ env.REPO_URL }} -b ${{ env.REPO_BRANCH }} openwrt
-        cd openwrt
-        echo "源码版本:"
-        git log --oneline -1
-        
-    - name: 准备 feeds 配置
-      run: |
-        cd ${{ github.workspace }}/openwrt
-        if [ -f ${{ github.workspace }}/config/${{ env.FEEDS_CONF }} ]; then
-          cp ${{ github.workspace }}/config/${{ env.FEEDS_CONF }} .
-        else
-          # 默认 feeds 配置
-          cat > feeds.conf.default << 'EOF'
-src-git packages https://git.openwrt.org/feed/packages.git
-src-git luci https://git.openwrt.org/project/luci.git
-src-git routing https://git.openwrt.org/feed/routing.git
-src-git telephony https://git.openwrt.org/feed/telephony.git
-EOF
-        fi
+    - name: 在 Docker 容器中构建
+      uses: docker://openwrtorg/sdk:x86_64-24.10
+      with:
+        args: /bin/sh -c "
+          echo '容器内构建开始...' &&
+          whoami &&
+          id &&
+          
+          # 创建工作目录
+          mkdir -p /home/build &&
+          cd /home/build &&
+          
+          # 克隆 OpenWrt 源码
+          echo '克隆 OpenWrt 源码...' &&
+          git clone ${{ env.REPO_URL }} -b ${{ env.REPO_BRANCH }} --depth 1 openwrt &&
+          cd openwrt &&
+          
+          # 复制配置文件
+          echo '复制配置文件...' &&
+          cp /github/workspace/openwrt-config/feeds.conf.default . 2>/dev/null || true &&
+          cp /github/workspace/openwrt-config/${{ env.CONFIG_FILE }} .config 2>/dev/null || true &&
+          
+          # 更新 feeds
+          echo '更新 feeds...' &&
+          ./scripts/feeds update -a &&
+          ./scripts/feeds install -a &&
+          
+          # 执行自定义脚本
+          if [ -f /github/workspace/openwrt-config/diy-part1.sh ]; then
+            echo '执行 diy-part1.sh...' &&
+            cp /github/workspace/openwrt-config/diy-part1.sh . &&
+            chmod +x diy-part1.sh &&
+            ./diy-part1.sh
+          fi &&
+          
+          if [ -f /github/workspace/openwrt-config/diy-part2.sh ]; then
+            echo '执行 diy-part2.sh...' &&
+            cp /github/workspace/openwrt-config/diy-part2.sh . &&
+            chmod +x diy-part2.sh &&
+            ./diy-part2.sh
+          fi &&
+          
+          # 配置检查
+          echo '配置检查...' &&
+          make defconfig &&
+          
+          # 下载源码包
+          echo '下载源码包...' &&
+          make -j${{ env.BUILD_JOBS }} download &&
+          find dl -size -1024c -exec rm -f {} \; 2>/dev/null || true &&
+          
+          # 开始编译
+          echo '开始编译...' &&
+          export FORCE_UNSAFE_CONFIGURE=1 &&
+          if [ '${{ github.event.inputs.clean_build }}' = 'true' ]; then
+            make clean &&
+            make -j${{ env.BUILD_JOBS }} V=s
+          else
+            make -j${{ env.BUILD_JOBS }} V=sc
+          fi &&
+          
+          echo '编译完成！' &&
+          ls -la bin/targets/${{ env.BUILD_TARGET }}/ &&
+          
+          # 复制固件到工作空间
+          mkdir -p /github/workspace/firmware &&
+          cp -r bin/targets/${{ env.BUILD_TARGET }}/* /github/workspace/firmware/ &&
+          
+          echo '固件已复制到工作空间'
+        "
 
-    - name: 更新和安装 feeds
+    - name: 复制固件到工作流
       run: |
-        cd ${{ github.workspace }}/openwrt
-        echo "更新 feeds..."
-        ./scripts/feeds update -a
-        echo "安装 feeds..."
-        ./scripts/feeds install -a
-
-    - name: 应用自定义配置 - Part 1
-      run: |
-        cd ${{ github.workspace }}/openwrt
-        if [ -f ${{ github.workspace }}/config/diy-part1.sh ]; then
-          echo "执行 diy-part1.sh..."
-          chmod +x ${{ github.workspace }}/config/diy-part1.sh
-          cp ${{ github.workspace }}/config/diy-part1.sh .
-          ./diy-part1.sh
-        else
-          echo "diy-part1.sh 不存在，跳过..."
-        fi
-
-    - name: 应用自定义配置 - Part 2
-      run: |
-        cd ${{ github.workspace }}/openwrt
-        if [ -f ${{ github.workspace }}/config/diy-part2.sh ]; then
-          echo "执行 diy-part2.sh..."
-          chmod +x ${{ github.workspace }}/config/diy-part2.sh
-          cp ${{ github.workspace }}/config/diy-part2.sh .
-          ./diy-part2.sh
-        else
-          echo "diy-part2.sh 不存在，跳过..."
-        fi
-
-    - name: 复制配置文件
-      run: |
-        cd ${{ github.workspace }}/openwrt
-        if [ -f ${{ github.workspace }}/config/${{ env.CONFIG_FILE }} ]; then
-          echo "复制配置文件..."
-          cp ${{ github.workspace }}/config/${{ env.CONFIG_FILE }} .config
-        else
-          echo "配置文件不存在，使用默认配置..."
-          make defconfig
-        fi
-
-    - name: 配置检查
-      run: |
-        cd ${{ github.workspace }}/openwrt
-        echo "检查配置..."
-        make defconfig
-        echo "当前配置摘要:"
-        grep -E "CONFIG_TARGET|CONFIG_PACKAGE|CONFIG_KERNEL" .config | head -20
-
-    - name: 下载源码包
-      run: |
-        cd ${{ github.workspace }}/openwrt
-        echo "开始下载源码包..."
-        make -j${{ env.BUILD_JOBS }} download
-        echo "下载完成，检查完整性..."
-        find dl -size -1024c -exec ls -la {} \;
-        find dl -size -1024c -exec rm -f {} \;
-
-    - name: 开始编译
-      run: |
-        cd ${{ github.workspace }}/openwrt
-        echo "开始编译固件..."
-        # 设置编译参数
-        export FORCE_UNSAFE_CONFIGURE=1
-        # 开始编译
-        if [ "${{ github.event.inputs.clean_build }}" = "true" ]; then
-          echo "执行完全清理构建..."
-          make clean
-          make -j${{ env.BUILD_JOBS }} V=s
-        else
-          make -j${{ env.BUILD_JOBS }} V=sc
-        fi
-
-    - name: 检查编译结果
-      run: |
-        cd ${{ github.workspace }}/openwrt
-        echo "编译结果:"
-        ls -la bin/targets/${{ env.BUILD_TARGET }}/
-        echo "固件大小:"
-        du -h bin/targets/${{ env.BUILD_TARGET }}/*.img.gz 2>/dev/null || echo "没有找到固件文件"
+        echo "检查固件文件..."
+        ls -la /github/workspace/firmware/ || echo "没有找到固件目录"
+        mkdir -p firmware-output
+        cp -r /github/workspace/firmware/* firmware-output/ 2>/dev/null || true
+        echo "固件输出目录内容:"
+        ls -la firmware-output/ || echo "输出目录为空"
 
     - name: 上传固件到工作流
       uses: actions/upload-artifact@v4
       if: success()
       with:
         name: openwrt-x86-64-${{ needs.prepare.outputs.build_time }}
-        path: ${{ github.workspace }}/openwrt/bin/targets/${{ env.BUILD_TARGET }}/*
+        path: firmware-output/*
         retention-days: 7
         compression-level: 9
 
-    - name: 上传配置文件
+    - name: 上传构建日志
       uses: actions/upload-artifact@v4
       if: always()
       with:
-        name: config-files-${{ needs.prepare.outputs.build_time }}
+        name: build-logs-${{ needs.prepare.outputs.build_time }}
         path: |
-          ${{ github.workspace }}/openwrt/.config
-          ${{ github.workspace }}/openwrt/feeds.conf
-          ${{ github.workspace }}/openwrt/feeds.conf.default
+          /github/workspace/openwrt-config/*
+          firmware-output/*.log 2>/dev/null || true
         retention-days: 7
 
   release:
@@ -216,9 +181,9 @@ EOF
         path: artifacts
 
     - name: 创建发布版本
-      uses: softprops/action-gh-release@v1
+      uses: ncipollo/release-action@v1
       with:
-        tag_name: ${{ github.event.inputs.version }}-${{ needs.prepare.outputs.build_time }}
+        tag: ${{ github.event.inputs.version }}-${{ needs.prepare.outputs.build_time }}
         name: OpenWrt x86-64 ${{ github.event.inputs.version }}
         body: |
           # OpenWrt x86-64 固件
@@ -248,12 +213,7 @@ EOF
           2. 写入到硬盘或虚拟机
           3. 访问 https://192.168.6.1
           4. 用户名: root，密码: (空)
-          
+        artifacts: |
+          artifacts/*
         draft: false
         prerelease: false
-        files: |
-          artifacts/*.img.gz
-          artifacts/*.vmdk
-          artifacts/*.vdi
-          artifacts/*.iso
-          artifacts/*.manifest
