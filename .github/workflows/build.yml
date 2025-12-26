@@ -193,7 +193,7 @@ jobs:
         retention-days: 7
         if-no-files-found: error
 
-        - name: 重命名固件文件
+    - name: 重命名固件文件
       run: |
         # 复制重命名脚本
         if [ -f rename-firmware.sh ]; then
