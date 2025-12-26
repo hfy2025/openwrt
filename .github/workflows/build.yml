@@ -2,8 +2,20 @@ name: Build OpenWrt
 
 on:
   workflow_dispatch:
+    inputs:
+      version:
+        description: '固件版本号'
+        required: true
+        default: 'v1.0'
+      tag_name:
+        description: '发布标签'
+        required: true
+        default: 'latest'
   push:
     branches: [ main ]
+    paths-ignore:
+      - 'README.md'
+      - '.gitignore'
   schedule:
     - cron: '0 2 * * 0'
 
