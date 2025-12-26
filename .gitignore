@@ -1,0 +1,24 @@
+# 构建文件
+openwrt/
+artifacts/
+*.img
+*.img.gz
+*.vmdk
+*.vdi
+*.iso
+*.manifest
+.config*
+tmp/
+logs/
+
+# 本地配置文件
+local-settings.sh
+.env
+secrets.ini
+
+# 编辑器文件
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
