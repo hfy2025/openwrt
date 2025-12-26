@@ -181,6 +181,47 @@ jobs:
         retention-days: 7
         if-no-files-found: error
 
+        - name: 重命名固件文件
+      run: |
+        # 复制重命名脚本
+        if [ -f rename-firmware.sh ]; then
+          chmod +x rename-firmware.sh
+          ./rename-firmware.sh
+        else
+          # 使用内置的重命名逻辑
+          cd openwrt
+          
+          if [ -d "bin/targets/${{ env.TARGET }}" ]; then
+            mkdir -p /tmp/openwrt-firmware
+            
+            # 简单的重命名逻辑
+            for file in bin/targets/${{ env.TARGET }}/*; do
+              if [ -f "$file" ]; then
+                filename=$(basename "$file")
+                extension="${filename##*.}"
+                
+                # 生成新文件名
+                if [[ "$filename" == *.gz ]]; then
+                  new_name="${{ steps.build_info.outputs.BUILD_TIME }}-openwrt-x86-64.img.gz"
+                elif [[ "$filename" == *.img ]]; then
+                  new_name="${{ steps.build_info.outputs.BUILD_TIME }}-openwrt-x86-64.img"
+                elif [[ "$filename" == *.vmdk ]]; then
+                  new_name="${{ steps.build_info.outputs.BUILD_TIME }}-openwrt-x86-64.vmdk"
+                elif [[ "$filename" == *.vdi ]]; then
+                  new_name="${{ steps.build_info.outputs.BUILD_TIME }}-openwrt-x86-64.vdi"
+                elif [[ "$filename" == *.iso ]]; then
+                  new_name="${{ steps.build_info.outputs.BUILD_TIME }}-openwrt-x86-64.iso"
+                else
+                  new_name="${{ steps.build_info.outputs.BUILD_TIME }}-openwrt-x86-64.$extension"
+                fi
+                
+                cp "$file" "/tmp/openwrt-firmware/$new_name"
+                echo "重命名: $filename -> $new_name"
+              fi
+            done
+          fi
+        fi
+        
     - name: 上传日志文件
       uses: actions/upload-artifact@v4
       if: always()
