@@ -65,7 +65,7 @@ jobs:
         # 复制配置文件
         if [ -f ../X86-64.config ]; then
           echo "使用自定义配置文件"
-          cp ../X86-64.config
+          cp ../X86-64.config .config
         else
           echo "使用默认配置"
           make defconfig
