@@ -1,134 +1,97 @@
-name: Build OpenWrt with OTA
+name: Build iStoreOS with Custom IP (192.168.6.1)
 
 on:
   push:
-    branches: [ main ]
-    paths:
-      - 'configs/**'
-      - 'scripts/**'
-      - 'feeds.conf.default'
-      - '.github/workflows/**'
-  schedule:
-    - cron: '0 8 * * 5' # 每周五UTC时间8点自动编译
-  workflow_dispatch: # 允许手动触发
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:  # 允许手动触发
     inputs:
-      version_tag:
-        description: '固件版本标签 (例如: v24.10-20260106)'
-        required: false
-        default: ''
-
-env:
-  TARGET: x86
-  SUBTARGET: 64
-  FIRMWARE: openwrt-x86-64-generic-squashfs-combined.img.gz
-  OTA_IMAGE: openwrt-x86-64-generic-squashfs-sysupgrade.bin
+      version:
+        description: 'iStoreOS branch/version (e.g., istoreos-22.03)'
+        required: true
+        default: 'istoreos-22.03'
 
 jobs:
   build:
-    runs-on: ubuntu-latest
-    container:
-      image: openwrtorg/imagebuilder:x86-64-generic-24.10
+    runs-on: ubuntu-22.04
+    timeout-minutes: 180  # 编译可能耗时较长，设置超时
+
     steps:
-    - name: Checkout repository
+    - name: Checkout Repository
       uses: actions/checkout@v4
       with:
         submodules: recursive
+        fetch-depth: 0
 
-    - name: Initialize and Update Feeds
+    - name: Setup Build Environment
       run: |
-        cp feeds.conf.default .
+        sudo apt-get update
+        sudo apt-get install -y build-essential ccache ecj fastjar file g++ gawk \
+        gettext git java-propose-classpath libelf-dev libncurses5-dev \
+        libncursesw5-dev libssl-dev python3 python3-pip python3-setuptools \
+        python3-dev qemu-utils rsync subversion swig time unzip wget \
+        zlib1g-dev
+
+    - name: Clone iStoreOS Source Code
+      run: |
+        git clone --depth=1 https://github.com/istoreos/istoreos.git -b ${{ github.event.inputs.version || 'istoreos-22.03' }}
+        cd istoreos
+
+    - name: Modify Default IP Address to 192.168.6.1
+      run: |
+        cd istoreos
+        # 方法1: 修改网络配置文件 (主要方法)
+        if [ -f "package/base-files/files/bin/config_generate" ]; then
+          sed -i "s/ipaddr='192\.168\.[0-9]*\.[0-9]*'/ipaddr='192.168.6.1'/" package/base-files/files/bin/config_generate
+          echo "✅ Modified default IP in config_generate"
+        fi
+        
+        # 方法2: 通过diffconfig文件设置 (备用方法)
+        echo "CONFIG_TARGET_IPADDR=\"192.168.6.1\"" >> .config
+        echo "CONFIG_TARGET_NETMASK=\"255.255.255.0\"" >> .config
+        echo "CONFIG_TARGET_GATEWAY=\"192.168.6.254\"" >> .config
+
+    - name: Configure Build Settings
+      run: |
+        cd istoreos
+        # 更新feeds
         ./scripts/feeds update -a
         ./scripts/feeds install -a
-
-    - name: Apply Custom Scripts (Part 1)
-      run: bash scripts/diy-part1.sh
-
-    - name: Load Configuration
-      run: |
-        cp configs/x86-64.config .config
+        
+        # 使用默认配置 (可根据需要修改)
+        cp configs/targets/x86_64.config .config
         make defconfig
 
-    - name: Apply Custom Scripts (Part 2)
-      run: bash scripts/diy-part2.sh
-
-    - name: Build Firmware
+    - name: Start Compilation
       run: |
-        make -j$(nproc) V=s
+        cd istoreos
+        # 开始编译，使用多核加速
+        make -j$(($(nproc) + 1)) V=s 2>&1 | tee build.log
+        
+        # 检查编译结果
+        if [ -f "bin/targets/x86/64/*-squashfs-combined.img.gz" ]; then
+          echo "🎉 Build successful!"
+          ls -la bin/targets/x86/64/
+        else
+          echo "❌ Build failed!"
+          exit 1
+        fi
 
-    - name: Prepare Firmware for Release
-      run: |
-        cd bin/targets/x86/64/
-        # 1. 重命名固件：获取版本和日期
-        BUILD_DATE=$(date +'%Y-%m-%d')
-        # 从源码或构建信息中提取OpenWrt版本号，这里假设为24.10
-        OPENWRT_VERSION="24.10"
-        NEW_FIRMWARE_NAME="openwrt-${OPENWRT_VERSION}-for-${BUILD_DATE}-x86-64-squashfs-combined.img.gz"
-        NEW_OTA_NAME="openwrt-${OPENWRT_VERSION}-for-${BUILD_DATE}-x86-64-squashfs-sysupgrade.bin"
-        
-        # 重命名主要固件文件
-        cp $FIRMWARE $NEW_FIRMWARE_NAME
-        cp $OTA_IMAGE $NEW_OTA_NAME
-        
-        # 2. 清理不需要的文件
-        rm -rf packages
-        rm -f *.buildinfo *.manifest sha256sums profiles.json
-        rm -f openwrt-x86-64-generic-kernel.bin
-        rm -f openwrt-x86-64-generic-rootfs.img.gz
-        
-        # 3. (可选) 生成并包含OTA升级描述文件
-        cat > sw-description << EOF
-        software =
-        {
-            version = "${OPENWRT_VERSION}-${BUILD_DATE}";
-            hardware-compatibility: ["x86-64"];
-        
-            files: (
-            {
-                filename = "${NEW_OTA_NAME}";
-                path = "/tmp/${NEW_OTA_NAME}";
-                sha256 = "$(sha256sum ${NEW_OTA_NAME} | cut -d' ' -f1)";
-            }
-            );
-        
-            scripts: (
-            {
-                filename = "upgrade_script.sh";
-                type = "shellscript";
-            }
-            );
-        }
-        EOF
-        
-        # 创建一个简单的升级脚本示例
-        cat > upgrade_script.sh << 'EOF'
-        #!/bin/sh
-        # 这是一个示例OTA升级脚本
-        sysupgrade -v /tmp/${NEW_OTA_NAME}
-        EOF
-        chmod +x upgrade_script.sh
-        
-        # 打包OTA升级包 (使用SWUpdate格式)
-        tar -czf ota-upgrade-${OPENWRT_VERSION}-${BUILD_DATE}.swu sw-description ${NEW_OTA_NAME} upgrade_script.sh
-        ls -la
-
-    - name: Upload Firmware to Release
-      uses: softprops/action-gh-release@v1
+    - name: Upload Firmware Artifacts
+      uses: actions/upload-artifact@v4
+      if: success()
       with:
-        files: |
-          bin/targets/x86/64/${{ env.NEW_FIRMWARE_NAME }}
-          bin/targets/x86/64/${{ env.NEW_OTA_NAME }}
-          bin/targets/x86/64/ota-upgrade-*.swu
-        tag_name: ${{ github.event.inputs.version_tag || 'v24.10-${{ github.run_number }}' }}
-        name: OpenWrt Build ${{ github.run_number }}
-        body: |
-          ### OpenWrt Automated Build
-          - **版本**: ${{ env.OPENWRT_VERSION }}
-          - **构建日期**: ${{ env.BUILD_DATE }}
-          - **内核**: 6.12
-          - **管理IP**: 192.168.6.1
-          - **包含插件**: 见配置文件
-          - **OTA支持**: 包含sysupgrade镜像和.swu升级包
-        draft: false
-        prerelease: false
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        name: iStoreOS-firmware-192.168.6.1
+        path: istoreos/bin/targets/**/*.img.gz
+        retention-days: 30
+
+    - name: Upload Build Log
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: build-logs
+        path: |
+          istoreos/build.log
+          istoreos/logs/
+        retention-days: 7
