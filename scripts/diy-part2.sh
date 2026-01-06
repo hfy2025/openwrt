@@ -12,23 +12,23 @@ cd openwrt || exit 1
 if [ -d "package/kenzo/openclash" ]; then
   echo "OpenClash已通过feeds添加。"
   # 切换到特定提交 (可选)
-  # cd package/kenzo/openclash && git checkout abc123 && cd ../../..
+   cd package/kenzo/openclash && git checkout abc123 && cd ../../..
 fi
 
 # 示例：为Dockerman添加依赖 (如果feeds中的版本需要)
-# if [ -d "package/kenzo/luci-app-dockerman" ]; then
-#   # 确保Docker相关内核模块已选中
-#   echo "CONFIG_PACKAGE_kmod-fs-btrfs=y" >> .config
-#   echo "CONFIG_PACKAGE_kmod-dm=y" >> .config
-#   echo "CONFIG_PACKAGE_kmod-br-netfilter=y" >> .config
-# fi
+ if [ -d "package/kenzo/luci-app-dockerman" ]; then
+   # 确保Docker相关内核模块已选中
+   echo "CONFIG_PACKAGE_kmod-fs-btrfs=y" >> .config
+   echo "CONFIG_PACKAGE_kmod-dm=y" >> .config
+   echo "CONFIG_PACKAGE_kmod-br-netfilter=y" >> .config
+ fi
 
 # 应用任何额外的内核补丁 (如果有)
-# for patch_file in ../patches/*.patch; do
-#   if [ -f "$patch_file" ]; then
-#     patch -p1 < "$patch_file"
-#   fi
-# done
+ for patch_file in ../patches/*.patch; do
+   if [ -f "$patch_file" ]; then
+     patch -p1 < "$patch_file"
+   fi
+ done
 
 # 重新生成.config以确保所有依赖被正确处理
 make defconfig
