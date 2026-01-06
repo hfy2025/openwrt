@@ -27,7 +27,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     container:
-      image: openwrt/imagebuilder:x86-64-24.10
+      image: openwrtorg/imagebuilder:x86-64-generic-24.10
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
