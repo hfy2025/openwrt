@@ -1,4 +1,12 @@
-src-git packages https://git.openwrt.org/feed/packages.git
-src-git luci https://git.openwrt.org/project/luci.git
-src-git routing https://git.openwrt.org/feed/routing.git
-src-git telephony https://git.openwrt.org/feed/telephony.git
+# 官方源
+src-git packages https://git.openwrt.org/feed/packages.git;openwrt-24.10
+src-git luci https://git.openwrt.org/project/luci.git;openwrt-24.10
+src-git routing https://git.openwrt.org/feed/routing.git;openwrt-24.10
+src-git telephony https://git.openwrt.org/feed/telephony.git;openwrt-24.10
+
+# 第三方源 (提供大量常用插件)
+src-git kenzo https://github.com/kenzok8/openwrt-packages.git;master
+src-git small https://github.com/kenzok8/small.git;main
+
+# 如果需要其他特定插件，可在此添加
+# src-git oaf https://github.com/destan19/OpenAppFilter.git;master
