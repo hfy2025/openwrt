@@ -1,246 +1,135 @@
-name: Build OpenWrt
+name: Build OpenWrt with OTA
 
 on:
-  workflow_dispatch:
-    inputs:
-      version:
-        description: '固件版本号'
-        required: true
-        default: 'v1.0'
-      tag_name:
-        description: '发布标签'
-        required: true
-        default: 'latest'
   push:
     branches: [ main ]
-    paths-ignore:
-      - 'README.md'
-      - '.gitignore'
+    paths:
+      - 'configs/**'
+      - 'scripts/**'
+      - 'feeds.conf.default'
+      - '.github/workflows/**'
   schedule:
-    - cron: '0 2 * * 0'
+    - cron: '0 8 * * 5' # 每周五UTC时间8点自动编译
+  workflow_dispatch: # 允许手动触发
+    inputs:
+      version_tag:
+        description: '固件版本标签 (例如: v24.10-20260106)'
+        required: false
+        default: ''
 
 env:
-  REPO_URL: https://github.com/openwrt/openwrt.git
-  REPO_BRANCH: openwrt-24.10
-  TARGET: x86/64
+  TARGET: x86
+  SUBTARGET: 64
+  FIRMWARE: openwrt-x86-64-generic-squashfs-combined.img.gz
+  OTA_IMAGE: openwrt-x86-64-generic-squashfs-sysupgrade.bin
 
 jobs:
   build:
-    runs-on: ubuntu-22.04
-    timeout-minutes: 180
+    runs-on: ubuntu-latest
+    container:
+      image: openwrtorg/sdk:x86-64-24.10
 
     steps:
-    - name: 检出代码
+    - name: Checkout repository
       uses: actions/checkout@v4
+      with:
+        submodules: recursive
 
-    - name: 设置环境变量
+    - name: Initialize and Update Feeds
       run: |
-        echo "BUILD_DATE=$(date +'%Y%m%d-%H%M%S')" >> $GITHUB_ENV
-        echo "COMMIT_HASH=$(git rev-parse --short HEAD)" >> $GITHUB_ENV
-
-    - name: 查看工作目录
-      run: |
-        echo "当前工作目录:"
-        pwd
-        ls -la
-
-    - name: 准备构建环境
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y build-essential clang flex bison g++ gawk gcc-multilib g++-multilib \
-          gettext git libncurses5-dev libssl-dev python3 python3-distutils rsync unzip zlib1g-dev \
-          file wget curl
-
-    - name: 克隆 OpenWrt 源码
-      run: |
-        git clone ${{ env.REPO_URL }} -b ${{ env.REPO_BRANCH }} --depth 1
-        cd openwrt
-        echo "OpenWrt 版本:"
-        git log --oneline -1
-
-    - name: 应用基础配置
-      run: |
-        cd openwrt
-        
-        # 复制配置文件
-        if [ -f ../X86-64.config ]; then
-          echo "使用自定义配置文件"
-          cp ../X86-64.config .config
-        else
-          echo "使用默认配置"
-          make defconfig
-        fi
-
-    - name: 执行自定义脚本
-      run: |
-        cd openwrt
-        
-        # 执行 diy-part1.sh
-        if [ -f ../diy-part1.sh ]; then
-          echo "执行 diy-part1.sh..."
-          chmod +x ../diy-part1.sh
-          cp ../diy-part1.sh .
-          ./diy-part1.sh
-        fi
-        
-        # 执行 diy-part2.sh
-        if [ -f ../diy-part2.sh ]; then
-          echo "执行 diy-part2.sh..."
-          chmod +x ../diy-part2.sh
-          cp ../diy-part2.sh .
-          ./diy-part2.sh
-        fi
-        
-        # 复制 feeds 配置
-        if [ -f ../feeds.conf.default ]; then
-          cp ../feeds.conf.default .
-        fi
-
-    - name: 更新 feeds
-      run: |
-        cd openwrt
+        cp feeds.conf.default .
         ./scripts/feeds update -a
         ./scripts/feeds install -a
 
-    - name: 最终配置
+    - name: Apply Custom Scripts (Part 1)
+      run: bash scripts/diy-part1.sh
+
+    - name: Load Configuration
       run: |
-        cd openwrt
+        cp configs/x86-64.config .config
         make defconfig
-        echo "最终配置摘要:"
-        echo "目标: ${{ env.TARGET }}"
-        grep -E "CONFIG_TARGET|CONFIG_KERNEL" .config || true
 
-    - name: 下载依赖包
+    - name: Apply Custom Scripts (Part 2)
+      run: bash scripts/diy-part2.sh
+
+    - name: Build Firmware
       run: |
-        cd openwrt
-        echo "下载依赖包..."
-        make -j$(nproc) download
-        echo "清理无效下载..."
-        find dl -size -1024c -delete 2>/dev/null || true
+        make -j$(nproc) V=s
 
-    - name: 编译固件
+    - name: Prepare Firmware for Release
       run: |
-        cd openwrt
-        export FORCE_UNSAFE_CONFIGURE=1
-        echo "开始编译..."
-        make -j$(nproc) V=s 2>&1 | tee build.log
+        cd bin/targets/x86/64/
+        # 1. 重命名固件：获取版本和日期
+        BUILD_DATE=$(date +'%Y-%m-%d')
+        # 从源码或构建信息中提取OpenWrt版本号，这里假设为24.10
+        OPENWRT_VERSION="24.10"
+        NEW_FIRMWARE_NAME="openwrt-${OPENWRT_VERSION}-for-${BUILD_DATE}-x86-64-squashfs-combined.img.gz"
+        NEW_OTA_NAME="openwrt-${OPENWRT_VERSION}-for-${BUILD_DATE}-x86-64-squashfs-sysupgrade.bin"
         
-        # 检查编译是否成功
-        if [ $? -eq 0 ]; then
-          echo "编译成功!"
-        else
-          echo "编译失败!"
-          exit 1
-        fi
+        # 重命名主要固件文件
+        cp $FIRMWARE $NEW_FIRMWARE_NAME
+        cp $OTA_IMAGE $NEW_OTA_NAME
+        
+        # 2. 清理不需要的文件
+        rm -rf packages
+        rm -f *.buildinfo *.manifest sha256sums profiles.json
+        rm -f openwrt-x86-64-generic-kernel.bin
+        rm -f openwrt-x86-64-generic-rootfs.img.gz
+        
+        # 3. (可选) 生成并包含OTA升级描述文件
+        cat > sw-description << EOF
+        software =
+        {
+            version = "${OPENWRT_VERSION}-${BUILD_DATE}";
+            hardware-compatibility: ["x86-64"];
+        
+            files: (
+            {
+                filename = "${NEW_OTA_NAME}";
+                path = "/tmp/${NEW_OTA_NAME}";
+                sha256 = "$(sha256sum ${NEW_OTA_NAME} | cut -d' ' -f1)";
+            }
+            );
+        
+            scripts: (
+            {
+                filename = "upgrade_script.sh";
+                type = "shellscript";
+            }
+            );
+        }
+        EOF
+        
+        # 创建一个简单的升级脚本示例
+        cat > upgrade_script.sh << 'EOF'
+        #!/bin/sh
+        # 这是一个示例OTA升级脚本
+        sysupgrade -v /tmp/${NEW_OTA_NAME}
+        EOF
+        chmod +x upgrade_script.sh
+        
+        # 打包OTA升级包 (使用SWUpdate格式)
+        tar -czf ota-upgrade-${OPENWRT_VERSION}-${BUILD_DATE}.swu sw-description ${NEW_OTA_NAME} upgrade_script.sh
+        ls -la
 
-    - name: 检查编译结果
-      run: |
-        cd openwrt
-        echo "检查固件文件..."
-        
-        # 检查固件文件是否存在
-        if [ -d "bin/targets/${{ env.TARGET }}" ]; then
-          echo "固件目录内容:"
-          ls -la bin/targets/${{ env.TARGET }}/
-          
-          echo "固件文件:"
-          find bin/targets/${{ env.TARGET }} -name "*.img" -o -name "*.img.gz" -o -name "*.vmdk" -o -name "*.vdi" | head -10
-          
-          # 检查文件大小
-          echo "文件大小:"
-          find bin/targets/${{ env.TARGET }} -name "*.img" -exec du -h {} \; 2>/dev/null || true
-          find bin/targets/${{ env.TARGET }} -name "*.img.gz" -exec du -h {} \; 2>/dev/null || true
-          
-          # 统计文件数量
-          echo "文件数量:"
-          find bin/targets/${{ env.TARGET }} -type f | wc -l
-        else
-          echo "错误: 固件目录不存在!"
-          echo "当前目录内容:"
-          pwd
-          ls -la
-          echo "bin目录内容:"
-          ls -la bin/ 2>/dev/null || echo "bin目录不存在"
-        fi
-
-    - name: 准备上传文件
-      run: |
-        cd openwrt
-        
-        # 创建上传目录
-        mkdir -p /tmp/upload
-        
-        # 复制固件文件
-        if [ -d "bin/targets/${{ env.TARGET }}" ]; then
-          echo "复制固件文件..."
-          cp -r bin/targets/${{ env.TARGET }}/* /tmp/upload/ 2>/dev/null || true
-        fi
-        
-        # 复制重要文件
-        cp .config /tmp/upload/ 2>/dev/null || true
-        cp feeds.conf.default /tmp/upload/ 2>/dev/null || true
-        cp build.log /tmp/upload/ 2>/dev/null || true
-        
-        echo "上传目录内容:"
-        ls -la /tmp/upload/
-
-    - name: 上传固件文件
-      uses: actions/upload-artifact@v4
-      if: success()
+    - name: Upload Firmware to Release
+      uses: softprops/action-gh-release@v1
       with:
-        name: openwrt-firmware-${{ env.BUILD_DATE }}
-        path: /tmp/upload/*
-        retention-days: 7
-        if-no-files-found: error
-
-    - name: 重命名固件文件
-      run: |
-        # 复制重命名脚本
-        if [ -f rename-firmware.sh ]; then
-          chmod +x rename-firmware.sh
-          ./rename-firmware.sh
-        else
-          # 使用内置的重命名逻辑
-          cd openwrt
-          
-          if [ -d "bin/targets/${{ env.TARGET }}" ]; then
-            mkdir -p /tmp/openwrt-firmware
-            
-            # 简单的重命名逻辑
-            for file in bin/targets/${{ env.TARGET }}/*; do
-              if [ -f "$file" ]; then
-                filename=$(basename "$file")
-                extension="${filename##*.}"
-                
-                # 生成新文件名
-                if [[ "$filename" == *.gz ]]; then
-                  new_name="${{ steps.build_info.outputs.BUILD_TIME }}-openwrt-x86-64.img.gz"
-                elif [[ "$filename" == *.img ]]; then
-                  new_name="${{ steps.build_info.outputs.BUILD_TIME }}-openwrt-x86-64.img"
-                elif [[ "$filename" == *.vmdk ]]; then
-                  new_name="${{ steps.build_info.outputs.BUILD_TIME }}-openwrt-x86-64.vmdk"
-                elif [[ "$filename" == *.vdi ]]; then
-                  new_name="${{ steps.build_info.outputs.BUILD_TIME }}-openwrt-x86-64.vdi"
-                elif [[ "$filename" == *.iso ]]; then
-                  new_name="${{ steps.build_info.outputs.BUILD_TIME }}-openwrt-x86-64.iso"
-                else
-                  new_name="${{ steps.build_info.outputs.BUILD_TIME }}-openwrt-x86-64.$extension"
-                fi
-                
-                cp "$file" "/tmp/openwrt-firmware/$new_name"
-                echo "重命名: $filename -> $new_name"
-              fi
-            done
-          fi
-        fi
-        
-    - name: 上传日志文件
-      uses: actions/upload-artifact@v4
-      if: always()
-      with:
-        name: build-logs-${{ env.BUILD_DATE }}
-        path: |
-          openwrt/build.log
-          openwrt/.config
-        retention-days: 3
-        if-no-files-found: ignore
+        files: |
+          bin/targets/x86/64/${{ env.NEW_FIRMWARE_NAME }}
+          bin/targets/x86/64/${{ env.NEW_OTA_NAME }}
+          bin/targets/x86/64/ota-upgrade-*.swu
+        tag_name: ${{ github.event.inputs.version_tag || 'v24.10-${{ github.run_number }}' }}
+        name: OpenWrt Build ${{ github.run_number }}
+        body: |
+          ### OpenWrt Automated Build
+          - **版本**: ${{ env.OPENWRT_VERSION }}
+          - **构建日期**: ${{ env.BUILD_DATE }}
+          - **内核**: 6.12
+          - **管理IP**: 192.168.6.1
+          - **包含插件**: 见配置文件
+          - **OTA支持**: 包含sysupgrade镜像和.swu升级包
+        draft: false
+        prerelease: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
