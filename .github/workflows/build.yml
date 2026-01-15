@@ -4,11 +4,11 @@ on:
   workflow_dispatch:
     inputs:
       skip_packages:
-        description: '跳过包下载（仅用于调试）'
+        description: 'Skip package download (debug only)'
         required: false
         default: 'false'
       build_type:
-        description: '构建类型'
+        description: 'Build type'
         required: true
         default: 'minimal'
         type: choice
@@ -145,6 +145,7 @@ jobs:
       run: |
         cd ${{ env.BUILD_DIR }}/immortalwrt
         
+        # 创建基础配置
         cat > .config << 'EOF'
 CONFIG_TARGET_x86=y
 CONFIG_TARGET_x86_64=y
@@ -171,10 +172,8 @@ CONFIG_PACKAGE_luci-app-dockerman=y
 CONFIG_PACKAGE_luci-app-cpufreq=y
 CONFIG_PACKAGE_luci-app-samba4=y
 EOF
-        elif [ "$BUILD_TYPE" = "full" ]; then
-          if [ -f "${{ github.workspace }}/configs/x86-64-diffconfig" ]; then
-            cat "${{ github.workspace }}/configs/x86-64-diffconfig" >> .config
-          fi
+        elif [ "$BUILD_TYPE" = "full" ] && [ -f "${{ github.workspace }}/configs/x86-64-diffconfig" ]; then
+          cat "${{ github.workspace }}/configs/x86-64-diffconfig" >> .config
         fi
         
         make defconfig
@@ -187,7 +186,7 @@ EOF
         rm -rf tmp .config.old 2>/dev/null || true
         
     - name: Download packages with retry
-      if: ${{ github.event.inputs.skip_packages != 'true' }}
+      if: github.event.inputs.skip_packages != 'true'
       continue-on-error: true
       run: |
         cd ${{ env.BUILD_DIR }}/immortalwrt
