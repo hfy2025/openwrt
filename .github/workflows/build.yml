@@ -12,7 +12,6 @@ on:
           - minimal
           - standard
 
-# 使用较低并行度减少内存和磁盘使用
 env:
   CPU_CORES: 1
   MAKE_JOBS: 2
@@ -29,17 +28,14 @@ jobs:
         echo "=== 初始磁盘空间 ==="
         df -h
         
-        # 清理系统缓存
         sudo apt-get clean
         sudo rm -rf /var/lib/apt/lists/*
         sudo rm -rf /usr/share/doc/
         sudo rm -rf /usr/share/man/
         sudo rm -rf /var/cache/
         
-        # 清理Docker（如果存在）
         docker system prune -af 2>/dev/null || true
         
-        # 清理日志文件
         sudo journalctl --vacuum-time=1d
         sudo find /var/log -type f -name "*.log" -size +1M -delete 2>/dev/null || true
         
@@ -48,15 +44,9 @@ jobs:
         
     - name: Checkout repository (最小化)
       uses: actions/checkout@v4
-      with:
-        sparse-checkout: |
-          .github/workflows
-          configs
-        sparse-checkout-cone-mode: false
         
     - name: Install only essential dependencies
       run: |
-        # 只安装绝对必要的包
         sudo apt-get update
         sudo apt-get install -y --no-install-recommends \
           build-essential libncurses5-dev libncursesw5-dev \
@@ -64,31 +54,20 @@ jobs:
           git wget rsync file gawk unzip zlib1g-dev gettext \
           gcc g++ make bash perl patch ca-certificates curl
         
-        # 立即清理缓存
         sudo apt-get clean
         sudo rm -rf /var/lib/apt/lists/*
         
-    - name: Setup working directory in tmpfs (使用内存文件系统)
+    - name: Setup working directory
       run: |
-        # 尝试使用tmpfs减少磁盘IO
-        if mount | grep -q /dev/shm; then
-          echo "使用tmpfs构建..."
-          BUILD_DIR=/dev/shm/build-openwrt
-          echo "BUILD_DIR=$BUILD_DIR" >> $GITHUB_ENV
-        else
-          echo "使用普通目录构建..."
-          BUILD_DIR=/tmp/build-openwrt
-          echo "BUILD_DIR=$BUILD_DIR" >> $GITHUB_ENV
-        fi
-        
+        BUILD_DIR=/tmp/build-openwrt
+        echo "BUILD_DIR=$BUILD_DIR" >> $GITHUB_ENV
         mkdir -p $BUILD_DIR
         
-    - name: Clone ImmortalWrt (超浅克隆)
+    - name: Clone ImmortalWrt
       run: |
         cd ${{ env.BUILD_DIR }}
         
-        # 使用最浅克隆
-        git clone --depth=1 --no-single-branch \
+        git clone --depth=1 \
           -b openwrt-25.12 \
           https://github.com/immortalwrt/immortalwrt.git
         
@@ -96,120 +75,99 @@ jobs:
         echo "源码目录大小:"
         du -sh .
         
-        # 立即清理git历史
-        rm -rf .git
-        
     - name: Create minimal configuration
       run: |
         cd ${{ env.BUILD_DIR }}/immortalwrt
         
-        # 创建绝对最小化配置
-        cat > .config << 'EOF'
-# 目标架构
-CONFIG_TARGET_x86=y
-CONFIG_TARGET_x86_64=y
-CONFIG_TARGET_x86_64_DEVICE_generic=y
-
-# 镜像设置
-CONFIG_TARGET_ROOTFS_PARTSIZE=256
-CONFIG_TARGET_KERNEL_PARTSIZE=8
-CONFIG_TARGET_ROOTFS_SQUASHFS=y
-CONFIG_TARGET_IMAGES_GZIP=y
-
-# LuCI最小化
-CONFIG_PACKAGE_luci=y
-CONFIG_PACKAGE_luci-base=y
-CONFIG_PACKAGE_luci-mod-admin-full=y
-CONFIG_PACKAGE_luci-theme-bootstrap=y
-
-# 基础网络
-CONFIG_PACKAGE_iptables=y
-CONFIG_PACKAGE_iptables-mod-conntrack-extra=y
-CONFIG_PACKAGE_iptables-mod-iprange=y
-CONFIG_PACKAGE_kmod-ipt-offload=y
-
-# 系统基础
-CONFIG_PACKAGE_block-mount=y
-CONFIG_PACKAGE_fdisk=y
-CONFIG_PACKAGE_opkg=y
-EOF
+        # 使用echo命令代替heredoc，避免YAML语法问题
+        echo "# 目标架构" > .config
+        echo "CONFIG_TARGET_x86=y" >> .config
+        echo "CONFIG_TARGET_x86_64=y" >> .config
+        echo "CONFIG_TARGET_x86_64_DEVICE_generic=y" >> .config
+        echo "" >> .config
+        echo "# 镜像设置" >> .config
+        echo "CONFIG_TARGET_ROOTFS_PARTSIZE=256" >> .config
+        echo "CONFIG_TARGET_KERNEL_PARTSIZE=8" >> .config
+        echo "CONFIG_TARGET_ROOTFS_SQUASHFS=y" >> .config
+        echo "CONFIG_TARGET_IMAGES_GZIP=y" >> .config
+        echo "" >> .config
+        echo "# LuCI最小化" >> .config
+        echo "CONFIG_PACKAGE_luci=y" >> .config
+        echo "CONFIG_PACKAGE_luci-base=y" >> .config
+        echo "CONFIG_PACKAGE_luci-mod-admin-full=y" >> .config
+        echo "CONFIG_PACKAGE_luci-theme-bootstrap=y" >> .config
+        echo "" >> .config
+        echo "# 基础网络" >> .config
+        echo "CONFIG_PACKAGE_iptables=y" >> .config
+        echo "CONFIG_PACKAGE_iptables-mod-conntrack-extra=y" >> .config
+        echo "CONFIG_PACKAGE_iptables-mod-iprange=y" >> .config
+        echo "CONFIG_PACKAGE_kmod-ipt-offload=y" >> .config
+        echo "" >> .config
+        echo "# 系统基础" >> .config
+        echo "CONFIG_PACKAGE_block-mount=y" >> .config
+        echo "CONFIG_PACKAGE_fdisk=y" >> .config
+        echo "CONFIG_PACKAGE_opkg=y" >> .config
         
         # 根据构建类型添加额外配置
         if [ "${{ github.event.inputs.build_type }}" = "standard" ]; then
-          cat >> .config << 'EOF'
-# Argon主题
-CONFIG_PACKAGE_luci-theme-argon=y
-
-# 网络工具
-CONFIG_PACKAGE_iperf3=y
-CONFIG_PACKAGE_ethtool=y
-CONFIG_PACKAGE_kmod-sched-cake=y
-
-# 基本插件
-CONFIG_PACKAGE_luci-app-upnp=y
-CONFIG_PACKAGE_luci-app-turboacc=y
-EOF
+          echo "# Argon主题" >> .config
+          echo "CONFIG_PACKAGE_luci-theme-argon=y" >> .config
+          echo "" >> .config
+          echo "# 网络工具" >> .config
+          echo "CONFIG_PACKAGE_iperf3=y" >> .config
+          echo "CONFIG_PACKAGE_ethtool=y" >> .config
+          echo "CONFIG_PACKAGE_kmod-sched-cake=y" >> .config
+          echo "" >> .config
+          echo "# 基本插件" >> .config
+          echo "CONFIG_PACKAGE_luci-app-upnp=y" >> .config
+          echo "CONFIG_PACKAGE_luci-app-turboacc=y" >> .config
         fi
         
         make defconfig
         echo "配置完成"
         ./scripts/diffconfig.sh
         
-    - name: Update feeds (选择性)
+    - name: Update feeds
       run: |
         cd ${{ env.BUILD_DIR }}/immortalwrt
         
-        # 只更新必要的feeds
         ./scripts/feeds update packages luci
         ./scripts/feeds install -a
         
         echo "Feeds更新完成"
         
-    - name: Download packages with cleanup
+    - name: Download packages
       run: |
         cd ${{ env.BUILD_DIR }}/immortalwrt
         
         echo "=== 开始下载包 ==="
         
-        # 设置下载超时和重试
-        for i in {1..3}; do
+        for i in 1 2 3; do
           echo "下载尝试 $i/3"
           make download -j1 V=0 && break
           sleep 15
         done
         
-        # 立即清理无效的下载文件
         find dl -size 0 -delete 2>/dev/null || true
         
         echo "下载包大小:"
         du -sh dl/ 2>/dev/null || echo "无下载包"
         
-        # 再次检查磁盘空间
         echo "=== 下载后磁盘空间 ==="
         df -h
         
-    - name: Build with aggressive space management
+    - name: Build
       run: |
         cd ${{ env.BUILD_DIR }}/immortalwrt
         
         echo "=== 编译前磁盘空间 ==="
         df -h
         
-        # 设置资源限制
-        ulimit -s 2048  # 减少栈大小
-        ulimit -n 512   # 减少文件描述符
+        ulimit -s 2048
+        ulimit -n 512
         
-        echo "开始编译内核..."
-        # 先编译内核，单独步骤
-        make target/linux/compile -j${{ env.MAKE_JOBS }} V=0 2>&1 | tee kernel_build.log
-        
-        # 清理内核构建中间文件
-        echo "清理内核构建文件..."
-        rm -rf build_dir/target-x86_64_musl/linux-x86_64 2>/dev/null || true
-        
-        echo "开始编译固件..."
-        # 使用最少输出编译
-        make -j${{ env.MAKE_JOBS }} V=s 2>&1 | tail -100
+        echo "开始编译..."
+        make -j${{ env.MAKE_JOBS }} V=0
         
         echo "编译完成，检查结果..."
         
@@ -217,7 +175,6 @@ EOF
       run: |
         cd ${{ env.BUILD_DIR }}/immortalwrt
         
-        # 查找生成的固件
         IMG_FILE=$(find bin/targets/x86/64 -name "*.img.gz" 2>/dev/null | head -1)
         
         if [ -f "$IMG_FILE" ]; then
@@ -225,21 +182,17 @@ EOF
           echo "固件文件: $IMG_FILE"
           ls -lh "$IMG_FILE"
           
-          # 复制到工作空间以便上传
           mkdir -p $GITHUB_WORKSPACE/output
           cp "$IMG_FILE" $GITHUB_WORKSPACE/output/
           
-          # 生成sha256校验
           sha256sum "$IMG_FILE" > "$IMG_FILE.sha256sum"
           cp "$IMG_FILE.sha256sum" $GITHUB_WORKSPACE/output/
         else
           echo "❌ 未找到固件文件"
-          echo "查找任何可能的输出文件..."
           find bin/ -type f -name "*.img*" -o -name "*.bin" 2>/dev/null | head -10 || true
           exit 1
         fi
         
-        # 最终磁盘使用报告
         echo "=== 最终磁盘使用情况 ==="
         df -h
         
@@ -266,18 +219,10 @@ EOF
       if: success()
       run: |
         echo "🎉 编译成功完成！"
-        echo "由于GitHub Actions磁盘空间限制，我们使用了最小化配置。"
-        echo "要获得更多功能，请考虑："
-        echo "1. 使用自托管的Runner（50GB+磁盘空间）"
-        echo "2. 使用专业CI服务（如GitLab CI）"
-        echo "3. 在本地机器上编译"
+        echo "固件已上传到Artifacts区域"
         
     - name: Failure notification
       if: failure()
       run: |
         echo "❌ 编译失败"
-        echo "这通常是由于GitHub Actions磁盘空间不足。"
-        echo "建议解决方案："
-        echo "1. 使用自托管Runner（推荐）"
-        echo "2. 使用更精简的配置"
-        echo "3. 考虑使用预编译固件"
+        echo "请检查日志"
