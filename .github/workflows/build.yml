@@ -15,275 +15,125 @@ on:
         options:
           - minimal
           - standard
-          - full
 
 env:
   CPU_CORES: 2
-  MAKE_JOBS: 3
+  MAKE_JOBS: 2
   BUILD_DIR: ${{ github.workspace }}/build
-  ARTIFACT_NAME: ImmortalWrt-x86-64-$(date +%Y%m%d-%H%M%S)
 
 jobs:
   build:
     runs-on: ubuntu-22.04
-    timeout-minutes: 240
+    timeout-minutes: 180
     
     steps:
-    - name: Check available disk space
+    - name: Check disk space
       run: |
         df -h
-        echo "Available space:"
+        echo "Available space on /home/runner:"
         df -h /home/runner | tail -1
         
     - name: Checkout repository
       uses: actions/checkout@v4
-      with:
-        submodules: false
-        
+      
     - name: Cleanup disk space
       run: |
         sudo apt-get clean
         sudo rm -rf /var/lib/apt/lists/*
-        sudo rm -rf /usr/share/doc/*
-        sudo rm -rf /usr/share/man/*
+        sudo rm -rf /usr/share/doc/
+        sudo rm -rf /usr/share/man/
         
-        docker system prune -af 2>/dev/null || true
-        
-        rm -rf ~/.npm ~/.cache/pip
-        
-        echo "Disk space after cleanup:"
-        df -h
-        
-    - name: Setup environment
+    - name: Install dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y --no-install-recommends \
+        sudo apt-get install -y \
           build-essential ccache libncurses5-dev \
           libncursesw5-dev libssl-dev python3 python3-distutils \
-          python3-dev git wget rsync subversion file gawk unzip \
-          zlib1g-dev gettext gcc g++ make bash perl patch \
-          ca-certificates
-        
-        sudo apt-get install -y --no-install-recommends \
-          time xsltproc upx curl tar bzip2 cpio
-        
-        sudo apt-get clean
-        
-    - name: Configure Git
-      run: |
-        git config --global user.email "github-actions@github.com"
-        git config --global user.name "GitHub Actions"
-        git config --global maintenance.auto false
-        git config --global gc.auto 0
+          python3-dev git wget rsync file gawk unzip \
+          zlib1g-dev gettext gcc g++ make bash perl patch
         
     - name: Setup ccache
       uses: hendrikmuhs/ccache-action@v1.2
       with:
-        key: ${{ runner.os }}-immortalwrt-x86-64
-        max-size: 500M
+        key: ${{ runner.os }}-immortalwrt
+        max-size: 300M
         
-    - name: Clone ImmortalWrt source
+    - name: Clone source
       run: |
         mkdir -p ${{ env.BUILD_DIR }}
         cd ${{ env.BUILD_DIR }}
-        git clone --depth=1 --single-branch \
-          -b openwrt-25.12 \
+        git clone --depth=1 -b openwrt-25.12 \
           https://github.com/immortalwrt/immortalwrt.git
-        
-        cd immortalwrt
-        echo "源码大小:"
-        du -sh .
-        
-    - name: Monitor disk space
-      run: |
-        echo "当前磁盘使用情况:"
-        df -h
-        echo "工作目录使用情况:"
-        du -sh ${{ github.workspace }}/* 2>/dev/null || true
-        
+          
     - name: Update feeds
       run: |
         cd ${{ env.BUILD_DIR }}/immortalwrt
-        
-        ./scripts/feeds update -a
-        
-        if [ "${{ github.event.inputs.build_type || 'minimal' }}" = "minimal" ]; then
-          ./scripts/feeds install -a -p packages
-          ./scripts/feeds install -a -p luci
-        else
-          ./scripts/feeds install -a
-        fi
-        
-    - name: Add custom plugins
-      run: |
-        cd ${{ env.BUILD_DIR }}/immortalwrt
-        
-        echo "=== 添加核心插件 ==="
-        
-        if [ ! -d "package/luci-theme-argon" ]; then
-            git clone --depth=1 https://github.com/jerrykuku/luci-theme-argon.git package/luci-theme-argon
-        fi
-        
-        BUILD_TYPE="${{ github.event.inputs.build_type || 'minimal' }}"
-        
-        if [ "$BUILD_TYPE" != "minimal" ]; then
-          if [ ! -d "package/passwall" ]; then
-              git clone --depth=1 -b x86 https://github.com/xiaorouji/openwrt-passwall.git package/passwall
-          fi
-        fi
-        
         ./scripts/feeds update -a
         ./scripts/feeds install -a
         
-    - name: Apply configuration
+    - name: Add Argon theme
+      run: |
+        cd ${{ env.BUILD_DIR }}/immortalwrt
+        git clone --depth=1 https://github.com/jerrykuku/luci-theme-argon.git package/luci-theme-argon
+        
+    - name: Create config file
       run: |
         cd ${{ env.BUILD_DIR }}/immortalwrt
         
-        # 创建基础配置
-        cat > .config << 'EOF'
-CONFIG_TARGET_x86=y
-CONFIG_TARGET_x86_64=y
-CONFIG_TARGET_x86_64_DEVICE_generic=y
-CONFIG_TARGET_ROOTFS_PARTSIZE=1024
-CONFIG_TARGET_KERNEL_PARTSIZE=16
-CONFIG_TARGET_ROOTFS_SQUASHFS=y
-CONFIG_PACKAGE_luci=y
-CONFIG_PACKAGE_luci-ssl-openssl=y
-CONFIG_PACKAGE_luci-theme-argon=y
-CONFIG_PACKAGE_iperf3=y
-CONFIG_PACKAGE_ethtool=y
-CONFIG_PACKAGE_kmod-sched-cake=y
-EOF
+        # 基础配置
+        echo "CONFIG_TARGET_x86=y" > .config
+        echo "CONFIG_TARGET_x86_64=y" >> .config
+        echo "CONFIG_TARGET_x86_64_DEVICE_generic=y" >> .config
+        echo "CONFIG_TARGET_ROOTFS_PARTSIZE=1024" >> .config
+        echo "CONFIG_TARGET_KERNEL_PARTSIZE=16" >> .config
+        echo "CONFIG_TARGET_ROOTFS_SQUASHFS=y" >> .config
+        echo "CONFIG_TARGET_IMAGES_GZIP=y" >> .config
+        echo "CONFIG_PACKAGE_luci=y" >> .config
+        echo "CONFIG_PACKAGE_luci-ssl-openssl=y" >> .config
+        echo "CONFIG_PACKAGE_luci-theme-argon=y" >> .config
         
-        BUILD_TYPE="${{ github.event.inputs.build_type || 'minimal' }}"
-        
-        if [ "$BUILD_TYPE" = "standard" ]; then
-          cat >> .config << 'EOF'
-CONFIG_PACKAGE_luci-app-adguardhome=y
-CONFIG_PACKAGE_luci-app-turboacc=y
-CONFIG_PACKAGE_luci-app-upnp=y
-CONFIG_PACKAGE_luci-app-dockerman=y
-CONFIG_PACKAGE_luci-app-cpufreq=y
-CONFIG_PACKAGE_luci-app-samba4=y
-EOF
-        elif [ "$BUILD_TYPE" = "full" ] && [ -f "${{ github.workspace }}/configs/x86-64-diffconfig" ]; then
-          cat "${{ github.workspace }}/configs/x86-64-diffconfig" >> .config
+        # 根据构建类型添加配置
+        if [ "${{ github.event.inputs.build_type }}" = "standard" ]; then
+          echo "CONFIG_PACKAGE_luci-app-adguardhome=y" >> .config
+          echo "CONFIG_PACKAGE_luci-app-turboacc=y" >> .config
+          echo "CONFIG_PACKAGE_luci-app-upnp=y" >> .config
+          echo "CONFIG_PACKAGE_iperf3=y" >> .config
+          echo "CONFIG_PACKAGE_ethtool=y" >> .config
+          echo "CONFIG_PACKAGE_kmod-sched-cake=y" >> .config
+        else
+          # minimal 构建
+          echo "CONFIG_PACKAGE_iperf3=y" >> .config
+          echo "CONFIG_PACKAGE_ethtool=y" >> .config
         fi
         
         make defconfig
-        echo "配置完成:"
-        ./scripts/diffconfig.sh
-        
-    - name: Clean before download
-      run: |
-        cd ${{ env.BUILD_DIR }}/immortalwrt
-        rm -rf tmp .config.old 2>/dev/null || true
         
     - name: Download packages
       if: ${{ github.event.inputs.skip_packages != 'true' }}
-      continue-on-error: true
       run: |
         cd ${{ env.BUILD_DIR }}/immortalwrt
+        make download -j${{ env.CPU_CORES }} V=0
         
-        for i in 1 2 3; do
-          echo "尝试下载包 $i/3..."
-          make download -j${{ env.CPU_CORES }} V=0 && break
-          sleep 10
-        done
-        
-        find dl -size 0 -delete 2>/dev/null || true
-        
-        echo "下载的包大小:"
-        du -sh dl/ || true
-        
-    - name: Check disk before build
-      run: |
-        echo "编译前的磁盘空间:"
-        df -h
-        echo "工作目录大小:"
-        du -sh ${{ github.workspace }} 2>/dev/null || true
-        
-    - name: Build firmware
+    - name: Build
       run: |
         cd ${{ env.BUILD_DIR }}/immortalwrt
+        echo "开始编译..."
+        make -j${{ env.MAKE_JOBS }} V=0
         
-        ulimit -s 8192
-        ulimit -n 1024
-        
-        echo "开始编译内核..."
-        make -j${{ env.MAKE_JOBS }} target/linux/{clean,prepare} V=s 2>&1 | tee -a build_kernel.log
-        
-        echo "开始编译固件..."
-        make -j${{ env.MAKE_JOBS }} V=0 2>&1 | tee build.log || make -j1 V=s 2>&1 | tee build_fallback.log
-        
-        IMG_PATH="bin/targets/x86/64"
-        if [ -f "$IMG_PATH/immortalwrt-x86-64-generic-squashfs-combined.img.gz" ]; then
-          echo "✅ 固件编译成功！"
-          ls -lh $IMG_PATH/*.img*
-          
-          echo "最终固件大小:"
-          du -sh $IMG_PATH/
+    - name: Check build result
+      run: |
+        cd ${{ env.BUILD_DIR }}/immortalwrt
+        if ls bin/targets/x86/64/*.img.gz 1> /dev/null 2>&1; then
+          echo "✅ 编译成功！"
+          ls -lh bin/targets/x86/64/*.img.gz
         else
-          echo "❌ 固件编译失败"
-          find bin/ -name "*.img*" -o -name "*.gz" 2>/dev/null || true
+          echo "❌ 编译失败"
           exit 1
         fi
         
-    - name: Cleanup build artifacts
-      run: |
-        cd ${{ env.BUILD_DIR }}/immortalwrt
-        
-        echo "清理中间文件..."
-        
-        echo "清理前大小:"
-        du -sh . || true
-        
-        rm -rf build_dir/*/linux-* 2>/dev/null || true
-        rm -rf build_dir/*/toolchain-* 2>/dev/null || true
-        rm -rf staging_dir/* 2>/dev/null || true
-        rm -rf tmp/* 2>/dev/null || true
-        
-        find . -name "*.o" -delete 2>/dev/null || true
-        find . -name "*.a" -delete 2>/dev/null || true
-        
-        echo "清理后大小:"
-        du -sh . || true
-        
-    - name: Upload firmware artifacts
+    - name: Upload artifact
       uses: actions/upload-artifact@v4
       with:
-        name: ${{ env.ARTIFACT_NAME }}
-        path: |
-          ${{ env.BUILD_DIR }}/immortalwrt/bin/targets/x86/64/*.img.gz
-          ${{ env.BUILD_DIR }}/immortalwrt/bin/targets/x86/64/*.manifest
+        name: immortalwrt-x86-64
+        path: ${{ env.BUILD_DIR }}/immortalwrt/bin/targets/x86/64/*.img.gz
         retention-days: 7
-        compression-level: 0
-        
-    - name: Upload logs
-      if: always()
-      uses: actions/upload-artifact@v4
-      with:
-        name: logs-${{ env.ARTIFACT_NAME }}
-        path: |
-          ${{ env.BUILD_DIR }}/immortalwrt/.config
-          ${{ env.BUILD_DIR }}/immortalwrt/build.log
-        retention-days: 30
-        
-    - name: Final disk report
-      if: always()
-      run: |
-        echo "最终磁盘使用情况:"
-        df -h
-        echo "工作目录最终大小:"
-        du -sh ${{ github.workspace }} 2>/dev/null || true
-        
-    - name: Notify completion
-      if: always()
-      run: |
-        if [ "${{ job.status }}" == "success" ]; then
-          echo "🎉 编译成功！"
-          echo "固件已上传到 Artifacts"
-        else
-          echo "❌ 编译失败"
-          echo "请查看日志"
-        fi
