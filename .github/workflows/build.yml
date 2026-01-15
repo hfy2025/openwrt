@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       skip_packages:
-        description: 'Skip package download (debug only)'
+        description: 'Skip package download'
         required: false
         default: 'false'
       build_type:
@@ -40,7 +40,7 @@ jobs:
       with:
         submodules: false
         
-    - name: Cleanup disk space before start
+    - name: Cleanup disk space
       run: |
         sudo apt-get clean
         sudo rm -rf /var/lib/apt/lists/*
@@ -54,7 +54,7 @@ jobs:
         echo "Disk space after cleanup:"
         df -h
         
-    - name: Setup environment with minimal dependencies
+    - name: Setup environment
       run: |
         sudo apt-get update
         sudo apt-get install -y --no-install-recommends \
@@ -76,13 +76,13 @@ jobs:
         git config --global maintenance.auto false
         git config --global gc.auto 0
         
-    - name: Setup ccache with size limit
+    - name: Setup ccache
       uses: hendrikmuhs/ccache-action@v1.2
       with:
         key: ${{ runner.os }}-immortalwrt-x86-64
         max-size: 500M
         
-    - name: Clone ImmortalWrt source with shallow clone
+    - name: Clone ImmortalWrt source
       run: |
         mkdir -p ${{ env.BUILD_DIR }}
         cd ${{ env.BUILD_DIR }}
@@ -101,7 +101,7 @@ jobs:
         echo "工作目录使用情况:"
         du -sh ${{ github.workspace }}/* 2>/dev/null || true
         
-    - name: Update feeds selectively
+    - name: Update feeds
       run: |
         cd ${{ env.BUILD_DIR }}/immortalwrt
         
@@ -114,7 +114,7 @@ jobs:
           ./scripts/feeds install -a
         fi
         
-    - name: Add only essential custom plugins
+    - name: Add custom plugins
       run: |
         cd ${{ env.BUILD_DIR }}/immortalwrt
         
@@ -130,18 +130,12 @@ jobs:
           if [ ! -d "package/passwall" ]; then
               git clone --depth=1 -b x86 https://github.com/xiaorouji/openwrt-passwall.git package/passwall
           fi
-          
-          if [ "$BUILD_TYPE" = "full" ] && [ ! -d "package/luci-app-openclash" ]; then
-              mkdir -p package/luci-app-openclash
-              curl -sL https://api.github.com/repos/vernesong/OpenClash/tarball/master | \
-                tar -xz -C package/luci-app-openclash --strip-components=1 --wildcards "*/luci-app-openclash/*"
-          fi
         fi
         
         ./scripts/feeds update -a
         ./scripts/feeds install -a
         
-    - name: Apply optimized configuration
+    - name: Apply configuration
       run: |
         cd ${{ env.BUILD_DIR }}/immortalwrt
         
@@ -177,22 +171,22 @@ EOF
         fi
         
         make defconfig
-        echo "配置完成，最终配置:"
+        echo "配置完成:"
         ./scripts/diffconfig.sh
         
-    - name: Clean unnecessary files before download
+    - name: Clean before download
       run: |
         cd ${{ env.BUILD_DIR }}/immortalwrt
         rm -rf tmp .config.old 2>/dev/null || true
         
-    - name: Download packages with retry
-      if: github.event.inputs.skip_packages != 'true'
+    - name: Download packages
+      if: ${{ github.event.inputs.skip_packages != 'true' }}
       continue-on-error: true
       run: |
         cd ${{ env.BUILD_DIR }}/immortalwrt
         
         for i in 1 2 3; do
-          echo "第 $i 次尝试下载包..."
+          echo "尝试下载包 $i/3..."
           make download -j${{ env.CPU_CORES }} V=0 && break
           sleep 10
         done
@@ -202,14 +196,14 @@ EOF
         echo "下载的包大小:"
         du -sh dl/ || true
         
-    - name: Monitor disk space before build
+    - name: Check disk before build
       run: |
         echo "编译前的磁盘空间:"
         df -h
         echo "工作目录大小:"
         du -sh ${{ github.workspace }} 2>/dev/null || true
         
-    - name: Build firmware with limited resources
+    - name: Build firmware
       run: |
         cd ${{ env.BUILD_DIR }}/immortalwrt
         
@@ -230,16 +224,16 @@ EOF
           echo "最终固件大小:"
           du -sh $IMG_PATH/
         else
-          echo "❌ 固件编译失败，查找可能的镜像文件..."
+          echo "❌ 固件编译失败"
           find bin/ -name "*.img*" -o -name "*.gz" 2>/dev/null || true
           exit 1
         fi
         
-    - name: Cleanup build artifacts to save space
+    - name: Cleanup build artifacts
       run: |
         cd ${{ env.BUILD_DIR }}/immortalwrt
         
-        echo "清理中间文件以节省空间..."
+        echo "清理中间文件..."
         
         echo "清理前大小:"
         du -sh . || true
@@ -248,11 +242,9 @@ EOF
         rm -rf build_dir/*/toolchain-* 2>/dev/null || true
         rm -rf staging_dir/* 2>/dev/null || true
         rm -rf tmp/* 2>/dev/null || true
-        rm -rf logs/* 2>/dev/null || true
         
         find . -name "*.o" -delete 2>/dev/null || true
         find . -name "*.a" -delete 2>/dev/null || true
-        find . -name "*.ko" -delete 2>/dev/null || true
         
         echo "清理后大小:"
         du -sh . || true
@@ -267,7 +259,7 @@ EOF
         retention-days: 7
         compression-level: 0
         
-    - name: Upload minimal logs
+    - name: Upload logs
       if: always()
       uses: actions/upload-artifact@v4
       with:
@@ -277,7 +269,7 @@ EOF
           ${{ env.BUILD_DIR }}/immortalwrt/build.log
         retention-days: 30
         
-    - name: Final disk space report
+    - name: Final disk report
       if: always()
       run: |
         echo "最终磁盘使用情况:"
@@ -289,16 +281,9 @@ EOF
       if: always()
       run: |
         if [ "${{ job.status }}" == "success" ]; then
-          echo "🎉 编译成功完成！"
-          echo "固件已上传到 Artifacts 区域"
-          echo "建议：如果仍然遇到空间不足问题，请考虑："
-          echo "1. 使用更精简的配置（minimal 模式）"
-          echo "2. 移除部分非必需插件"
-          echo "3. 使用自托管 Runner 获得更多磁盘空间"
+          echo "🎉 编译成功！"
+          echo "固件已上传到 Artifacts"
         else
           echo "❌ 编译失败"
-          echo "常见原因："
-          echo "1. 磁盘空间不足 - 尝试 minimal 构建"
-          echo "2. 网络超时 - 重新运行工作流"
-          echo "3. 内存不足 - 减少 MAKE_JOBS 数量"
+          echo "请查看日志"
         fi
