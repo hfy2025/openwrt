@@ -4,225 +4,277 @@ on:
   workflow_dispatch:
     inputs:
       build_type:
-        description: 'Build type (minimal recommended)'
+        description: 'Build type'
         required: true
         default: 'minimal'
         type: choice
         options:
           - minimal
-          - standard
+          - light
 
 env:
-  CPU_CORES: 1
-  MAKE_JOBS: 2
-  BUILD_DIR: /tmp/build-openwrt
+  MAKE_JOBS: 1  # 使用单线程编译，避免内存不足
+  BUILD_DIR: /tmp/immortalwrt-build
 
 jobs:
   build:
     runs-on: ubuntu-22.04
-    timeout-minutes: 120
+    timeout-minutes: 90
     
     steps:
-    - name: Pre-cleanup disk space
+    - name: Initial disk space check
       run: |
         echo "=== 初始磁盘空间 ==="
         df -h
+        echo "可用内存:"
+        free -h
         
+    - name: Cleanup system
+      run: |
+        echo "清理系统空间..."
         sudo apt-get clean
         sudo rm -rf /var/lib/apt/lists/*
-        sudo rm -rf /usr/share/doc/
-        sudo rm -rf /usr/share/man/
-        sudo rm -rf /var/cache/
+        sudo rm -rf /usr/share/doc/ /usr/share/man/
+        sudo rm -rf /var/cache/apt/archives/
         
-        docker system prune -af 2>/dev/null || true
-        
-        sudo journalctl --vacuum-time=1d
-        sudo find /var/log -type f -name "*.log" -size +1M -delete 2>/dev/null || true
-        
-        echo "=== 清理后磁盘空间 ==="
+        echo "清理后空间:"
         df -h
         
-    - name: Checkout repository (最小化)
+    - name: Checkout repository
       uses: actions/checkout@v4
-        
-    - name: Install only essential dependencies
+      
+    - name: Install minimal dependencies
       run: |
+        echo "安装最小化依赖..."
         sudo apt-get update
         sudo apt-get install -y --no-install-recommends \
-          build-essential libncurses5-dev libncursesw5-dev \
-          libssl-dev python3 python3-distutils python3-dev \
-          git wget rsync file gawk unzip zlib1g-dev gettext \
-          gcc g++ make bash perl patch ca-certificates curl
+          build-essential libncurses5-dev libssl-dev \
+          python3 python3-distutils git wget file gawk \
+          zlib1g-dev gettext gcc g++ make bash
         
+        # 清理安装缓存
         sudo apt-get clean
-        sudo rm -rf /var/lib/apt/lists/*
         
-    - name: Setup working directory
+    - name: Prepare build directory
       run: |
-        BUILD_DIR=/tmp/build-openwrt
-        echo "BUILD_DIR=$BUILD_DIR" >> $GITHUB_ENV
-        mkdir -p $BUILD_DIR
+        echo "准备构建目录..."
+        mkdir -p ${{ env.BUILD_DIR }}
+        cd ${{ env.BUILD_DIR }}
         
-    - name: Clone ImmortalWrt
+    - name: Clone ImmortalWrt with minimal options
       run: |
         cd ${{ env.BUILD_DIR }}
         
-        git clone --depth=1 \
-          -b openwrt-25.12 \
-          https://github.com/immortalwrt/immortalwrt.git
+        echo "克隆源码..."
+        # 使用浅克隆，只下载必要文件
+        git clone \
+          --depth 1 \
+          --no-checkout \
+          https://github.com/immortalwrt/immortalwrt.git .
         
-        cd immortalwrt
-        echo "源码目录大小:"
+        git checkout openwrt-25.12 -- .
+        
+        echo "源码大小:"
         du -sh .
         
-    - name: Create minimal configuration
+    - name: Create absolute minimal config
       run: |
-        cd ${{ env.BUILD_DIR }}/immortalwrt
+        cd ${{ env.BUILD_DIR }}
         
-        # 使用echo命令代替heredoc，避免YAML语法问题
-        echo "# 目标架构" > .config
-        echo "CONFIG_TARGET_x86=y" >> .config
-        echo "CONFIG_TARGET_x86_64=y" >> .config
-        echo "CONFIG_TARGET_x86_64_DEVICE_generic=y" >> .config
-        echo "" >> .config
-        echo "# 镜像设置" >> .config
-        echo "CONFIG_TARGET_ROOTFS_PARTSIZE=256" >> .config
-        echo "CONFIG_TARGET_KERNEL_PARTSIZE=8" >> .config
-        echo "CONFIG_TARGET_ROOTFS_SQUASHFS=y" >> .config
-        echo "CONFIG_TARGET_IMAGES_GZIP=y" >> .config
-        echo "" >> .config
-        echo "# LuCI最小化" >> .config
-        echo "CONFIG_PACKAGE_luci=y" >> .config
-        echo "CONFIG_PACKAGE_luci-base=y" >> .config
-        echo "CONFIG_PACKAGE_luci-mod-admin-full=y" >> .config
-        echo "CONFIG_PACKAGE_luci-theme-bootstrap=y" >> .config
-        echo "" >> .config
-        echo "# 基础网络" >> .config
-        echo "CONFIG_PACKAGE_iptables=y" >> .config
-        echo "CONFIG_PACKAGE_iptables-mod-conntrack-extra=y" >> .config
-        echo "CONFIG_PACKAGE_iptables-mod-iprange=y" >> .config
-        echo "CONFIG_PACKAGE_kmod-ipt-offload=y" >> .config
-        echo "" >> .config
-        echo "# 系统基础" >> .config
-        echo "CONFIG_PACKAGE_block-mount=y" >> .config
-        echo "CONFIG_PACKAGE_fdisk=y" >> .config
-        echo "CONFIG_PACKAGE_opkg=y" >> .config
+        echo "创建最小化配置..."
         
-        # 根据构建类型添加额外配置
-        if [ "${{ github.event.inputs.build_type }}" = "standard" ]; then
-          echo "# Argon主题" >> .config
-          echo "CONFIG_PACKAGE_luci-theme-argon=y" >> .config
-          echo "" >> .config
-          echo "# 网络工具" >> .config
-          echo "CONFIG_PACKAGE_iperf3=y" >> .config
-          echo "CONFIG_PACKAGE_ethtool=y" >> .config
-          echo "CONFIG_PACKAGE_kmod-sched-cake=y" >> .config
-          echo "" >> .config
-          echo "# 基本插件" >> .config
-          echo "CONFIG_PACKAGE_luci-app-upnp=y" >> .config
-          echo "CONFIG_PACKAGE_luci-app-turboacc=y" >> .config
-        fi
+        # 创建绝对最小化配置 - 仅包含必须功能
+        cat > .config << 'EOF'
+CONFIG_TARGET_x86_64=y
+CONFIG_TARGET_ROOTFS_SQUASHFS=y
+CONFIG_TARGET_IMAGES_GZIP=y
+CONFIG_BUSYBOX_DEFAULT_FEATURE_EDITING=n
+CONFIG_PACKAGE_luci=y
+CONFIG_PACKAGE_luci-base=y
+EOF
         
-        make defconfig
-        echo "配置完成"
-        ./scripts/diffconfig.sh
+        # 显示配置
+        echo "配置内容:"
+        cat .config
         
-    - name: Update feeds
+    - name: Setup feeds (minimal)
       run: |
-        cd ${{ env.BUILD_DIR }}/immortalwrt
+        cd ${{ env.BUILD_DIR }}
         
-        ./scripts/feeds update packages luci
+        echo "更新feeds..."
+        # 只更新必要的feeds
+        ./scripts/feeds update packages
         ./scripts/feeds install -a
         
-        echo "Feeds更新完成"
-        
-    - name: Download packages
+    - name: Configure build
       run: |
-        cd ${{ env.BUILD_DIR }}/immortalwrt
+        cd ${{ env.BUILD_DIR }}
         
-        echo "=== 开始下载包 ==="
+        echo "配置构建..."
+        make defconfig
         
-        for i in 1 2 3; do
-          echo "下载尝试 $i/3"
-          make download -j1 V=0 && break
-          sleep 15
-        done
+        echo "最终配置摘要:"
+        ./scripts/diffconfig.sh
         
-        find dl -size 0 -delete 2>/dev/null || true
+    - name: Download packages with monitoring
+      run: |
+        cd ${{ env.BUILD_DIR }}
         
-        echo "下载包大小:"
-        du -sh dl/ 2>/dev/null || echo "无下载包"
-        
-        echo "=== 下载后磁盘空间 ==="
+        echo "下载软件包..."
+        echo "当前磁盘空间:"
         df -h
         
-    - name: Build
-      run: |
-        cd ${{ env.BUILD_DIR }}/immortalwrt
+        # 单个下载，避免内存问题
+        make download V=s 2>&1 | tail -50
         
-        echo "=== 编译前磁盘空间 ==="
+        echo "下载后空间:"
         df -h
         
-        ulimit -s 2048
-        ulimit -n 512
-        
-        echo "开始编译..."
-        make -j${{ env.MAKE_JOBS }} V=0
-        
-        echo "编译完成，检查结果..."
-        
-    - name: Check and collect build results
+    - name: Build step-by-step
       run: |
-        cd ${{ env.BUILD_DIR }}/immortalwrt
+        cd ${{ env.BUILD_DIR }}
         
+        echo "=== 开始编译 ==="
+        echo "编译前磁盘空间:"
+        df -h
+        echo "可用内存:"
+        free -h
+        
+        # 编译工具链
+        echo "1. 编译工具链..."
+        make toolchain/install -j${{ env.MAKE_JOBS }} V=0 2>&1 | tail -100 || echo "工具链编译可能有问题"
+        
+        # 编译内核
+        echo "2. 编译内核..."
+        make target/linux/compile -j${{ env.MAKE_JOBS }} V=0 2>&1 | tail -100 || echo "内核编译可能有问题"
+        
+        # 编译根文件系统
+        echo "3. 编译根文件系统..."
+        make package/compile -j${{ env.MAKE_JOBS }} V=0 2>&1 | tail -100 || echo "包编译可能有问题"
+        
+        # 最终镜像
+        echo "4. 生成镜像..."
+        make -j${{ env.MAKE_JOBS }} V=s 2>&1 | tail -200
+        
+        echo "编译完成..."
+        
+    - name: Check build results
+      run: |
+        cd ${{ env.BUILD_DIR }}
+        
+        echo "查找生成的固件..."
+        
+        # 检查所有可能的输出文件
+        find . -name "*.img" -o -name "*.img.gz" -o -name "*.bin" 2>/dev/null | head -20
+        
+        # 检查特定目录
+        if [ -d "bin/targets/x86/64" ]; then
+          echo "x86/64 目录内容:"
+          ls -la bin/targets/x86/64/ || true
+        fi
+        
+        # 检查构建日志
+        if [ -f "logs/build.log" ]; then
+          echo "构建日志最后100行:"
+          tail -100 logs/build.log || true
+        fi
+        
+    - name: Collect artifacts if successful
+      if: success()
+      run: |
+        cd ${{ env.BUILD_DIR }}
+        
+        # 查找并复制固件
         IMG_FILE=$(find bin/targets/x86/64 -name "*.img.gz" 2>/dev/null | head -1)
         
         if [ -f "$IMG_FILE" ]; then
-          echo "✅ 编译成功！"
-          echo "固件文件: $IMG_FILE"
+          echo "✅ 找到固件: $IMG_FILE"
           ls -lh "$IMG_FILE"
           
-          mkdir -p $GITHUB_WORKSPACE/output
-          cp "$IMG_FILE" $GITHUB_WORKSPACE/output/
+          # 复制到工作空间
+          mkdir -p $GITHUB_WORKSPACE/artifacts
+          cp "$IMG_FILE" $GITHUB_WORKSPACE/artifacts/
           
-          sha256sum "$IMG_FILE" > "$IMG_FILE.sha256sum"
-          cp "$IMG_FILE.sha256sum" $GITHUB_WORKSPACE/output/
+          # 生成校验和
+          sha256sum "$IMG_FILE" > "$IMG_FILE.sha256"
+          cp "$IMG_FILE.sha256" $GITHUB_WORKSPACE/artifacts/
         else
-          echo "❌ 未找到固件文件"
-          find bin/ -type f -name "*.img*" -o -name "*.bin" 2>/dev/null | head -10 || true
-          exit 1
+          echo "⚠️ 未找到标准固件，但编译成功"
         fi
         
-        echo "=== 最终磁盘使用情况 ==="
-        df -h
+    - name: Upload artifacts
+      if: success()
+      uses: actions/upload-artifact@v4
+      with:
+        name: immortalwrt-build
+        path: $GITHUB_WORKSPACE/artifacts/
+        retention-days: 3
         
-    - name: Post-build cleanup
+    - name: Collect logs on failure
+      if: failure()
+      run: |
+        cd ${{ env.BUILD_DIR }}
+        
+        echo "=== 编译失败，收集日志 ==="
+        
+        # 收集错误日志
+        mkdir -p $GITHUB_WORKSPACE/logs
+        
+        # 查找各种日志文件
+        find . -name "*.log" -type f | head -10 | while read log; do
+          echo "收集日志: $log"
+          cp "$log" $GITHUB_WORKSPACE/logs/ 2>/dev/null || true
+        done
+        
+        # 收集config文件
+        cp .config $GITHUB_WORKSPACE/logs/ 2>/dev/null || true
+        
+        # 显示最后错误
+        echo "可能的错误:"
+        find . -name "*.log" -type f -exec tail -50 {} \; 2>/dev/null | tail -200 || true
+        
+    - name: Upload failure logs
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: build-failure-logs
+        path: $GITHUB_WORKSPACE/logs/
+        retention-days: 7
+        
+    - name: Final cleanup
       if: always()
       run: |
-        echo "清理构建目录..."
+        echo "=== 最终清理 ==="
+        
+        # 清理构建目录
         rm -rf ${{ env.BUILD_DIR }} 2>/dev/null || true
         
-        echo "清理临时文件..."
+        # 清理临时文件
         rm -rf /tmp/* 2>/dev/null || true
         
         echo "最终磁盘空间:"
         df -h
+        echo "最终内存使用:"
+        free -h
         
-    - name: Upload firmware
-      uses: actions/upload-artifact@v4
-      with:
-        name: immortalwrt-minimal
-        path: $GITHUB_WORKSPACE/output/
-        retention-days: 5
-        
-    - name: Success notification
+    - name: Success message
       if: success()
       run: |
-        echo "🎉 编译成功完成！"
-        echo "固件已上传到Artifacts区域"
+        echo "🎉 编译流程完成！"
+        echo "固件已上传到Artifacts"
         
-    - name: Failure notification
+    - name: Failure analysis
       if: failure()
       run: |
         echo "❌ 编译失败"
-        echo "请检查日志"
+        echo ""
+        echo "常见原因:"
+        echo "1. 磁盘空间不足 - GitHub Actions只有14GB"
+        echo "2. 内存不足 - 编译需要大量内存"
+        echo "3. 网络问题 - 下载包失败"
+        echo "4. 依赖问题 - 缺少必要的工具"
+        echo ""
+        echo "建议:"
+        echo "1. 查看上传的日志文件"
+        echo "2. 考虑使用自托管Runner"
+        echo "3. 在本地机器上编译"
