@@ -10,7 +10,7 @@ on:
       build_type:
         description: '构建类型'
         required: true
-        default: 'minimal'  # 默认改为最小化编译
+        default: 'minimal'
         type: choice
         options:
           - minimal
@@ -18,21 +18,15 @@ on:
           - full
 
 env:
-  CPU_CORES: 2  # 降低并行度以减少内存和磁盘压力
-  MAKE_JOBS: 3  # 核心数+1，但不要太高
+  CPU_CORES: 2
+  MAKE_JOBS: 3
   BUILD_DIR: ${{ github.workspace }}/build
   ARTIFACT_NAME: ImmortalWrt-x86-64-$(date +%Y%m%d-%H%M%S)
 
 jobs:
   build:
     runs-on: ubuntu-22.04
-    timeout-minutes: 240  # 减少超时时间
-    
-    # 添加策略以使用更大的 Runner（如果需要）
-    # strategy:
-    #   matrix:
-    #     runner: [ubuntu-latest]
-    #   # 如果需要更大的磁盘空间，可以考虑使用自托管 Runner
+    timeout-minutes: 240
     
     steps:
     - name: Check available disk space
@@ -44,20 +38,17 @@ jobs:
     - name: Checkout repository
       uses: actions/checkout@v4
       with:
-        submodules: false  # 禁用子模块以减少初始占用
+        submodules: false
         
     - name: Cleanup disk space before start
       run: |
-        # 清理系统缓存和临时文件
         sudo apt-get clean
         sudo rm -rf /var/lib/apt/lists/*
         sudo rm -rf /usr/share/doc/*
         sudo rm -rf /usr/share/man/*
         
-        # 清理 Docker 缓存（如果有）
         docker system prune -af 2>/dev/null || true
         
-        # 清理 npm 和 pip 缓存
         rm -rf ~/.npm ~/.cache/pip
         
         echo "Disk space after cleanup:"
@@ -65,7 +56,6 @@ jobs:
         
     - name: Setup environment with minimal dependencies
       run: |
-        # 只安装必要的编译工具，跳过文档和非必需包
         sudo apt-get update
         sudo apt-get install -y --no-install-recommends \
           build-essential ccache libncurses5-dev \
@@ -74,18 +64,15 @@ jobs:
           zlib1g-dev gettext gcc g++ make bash perl patch \
           ca-certificates
         
-        # 选择性安装其他工具
         sudo apt-get install -y --no-install-recommends \
           time xsltproc upx curl tar bzip2 cpio
         
-        # 清理安装缓存
         sudo apt-get clean
         
     - name: Configure Git
       run: |
         git config --global user.email "github-actions@github.com"
         git config --global user.name "GitHub Actions"
-        # 禁用 git 维护和垃圾回收以减少磁盘写入
         git config --global maintenance.auto false
         git config --global gc.auto 0
         
@@ -93,13 +80,12 @@ jobs:
       uses: hendrikmuhs/ccache-action@v1.2
       with:
         key: ${{ runner.os }}-immortalwrt-x86-64
-        max-size: 500M  # 限制 ccache 大小为 500MB
+        max-size: 500M
         
     - name: Clone ImmortalWrt source with shallow clone
       run: |
         mkdir -p ${{ env.BUILD_DIR }}
         cd ${{ env.BUILD_DIR }}
-        # 使用浅克隆和单分支减少空间
         git clone --depth=1 --single-branch \
           -b openwrt-25.12 \
           https://github.com/immortalwrt/immortalwrt.git
@@ -118,10 +104,9 @@ jobs:
     - name: Update feeds selectively
       run: |
         cd ${{ env.BUILD_DIR }}/immortalwrt
-        # 只更新必要的 feeds，减少下载量
+        
         ./scripts/feeds update -a
         
-        # 根据构建类型选择性安装
         if [ "${{ github.event.inputs.build_type || 'minimal' }}" = "minimal" ]; then
           ./scripts/feeds install -a -p packages
           ./scripts/feeds install -a -p luci
@@ -133,24 +118,19 @@ jobs:
       run: |
         cd ${{ env.BUILD_DIR }}/immortalwrt
         
-        # 只添加核心插件，其他通过 feeds 安装
         echo "=== 添加核心插件 ==="
         
-        # Argon 主题是必须的
         if [ ! -d "package/luci-theme-argon" ]; then
             git clone --depth=1 https://github.com/jerrykuku/luci-theme-argon.git package/luci-theme-argon
         fi
         
-        # 根据构建类型决定添加哪些插件
         BUILD_TYPE="${{ github.event.inputs.build_type || 'minimal' }}"
         
         if [ "$BUILD_TYPE" != "minimal" ]; then
-          # 添加 Passwall（仅在标准/完整构建中）
           if [ ! -d "package/passwall" ]; then
               git clone --depth=1 -b x86 https://github.com/xiaorouji/openwrt-passwall.git package/passwall
           fi
           
-          # 添加 OpenClash（仅在完整构建中）
           if [ "$BUILD_TYPE" = "full" ] && [ ! -d "package/luci-app-openclash" ]; then
               mkdir -p package/luci-app-openclash
               curl -sL https://api.github.com/repos/vernesong/OpenClash/tarball/master | \
@@ -158,7 +138,6 @@ jobs:
           fi
         fi
         
-        # 更新 feeds 包含新添加的包
         ./scripts/feeds update -a
         ./scripts/feeds install -a
         
@@ -166,7 +145,6 @@ jobs:
       run: |
         cd ${{ env.BUILD_DIR }}/immortalwrt
         
-        # 创建最小化配置
         cat > .config << 'EOF'
 CONFIG_TARGET_x86=y
 CONFIG_TARGET_x86_64=y
@@ -182,7 +160,6 @@ CONFIG_PACKAGE_ethtool=y
 CONFIG_PACKAGE_kmod-sched-cake=y
 EOF
         
-        # 根据构建类型添加更多包
         BUILD_TYPE="${{ github.event.inputs.build_type || 'minimal' }}"
         
         if [ "$BUILD_TYPE" = "standard" ]; then
@@ -195,7 +172,6 @@ CONFIG_PACKAGE_luci-app-cpufreq=y
 CONFIG_PACKAGE_luci-app-samba4=y
 EOF
         elif [ "$BUILD_TYPE" = "full" ]; then
-          # 使用原始完整配置
           if [ -f "${{ github.workspace }}/configs/x86-64-diffconfig" ]; then
             cat "${{ github.workspace }}/configs/x86-64-diffconfig" >> .config
           fi
@@ -208,23 +184,20 @@ EOF
     - name: Clean unnecessary files before download
       run: |
         cd ${{ env.BUILD_DIR }}/immortalwrt
-        # 清理不必要的文件
         rm -rf tmp .config.old 2>/dev/null || true
         
     - name: Download packages with retry
-      if: ${{ inputs.skip_packages != 'true' }}
+      if: ${{ github.event.inputs.skip_packages != 'true' }}
       continue-on-error: true
       run: |
         cd ${{ env.BUILD_DIR }}/immortalwrt
         
-        # 分步骤下载，避免一次下载太多
         for i in 1 2 3; do
           echo "第 $i 次尝试下载包..."
           make download -j${{ env.CPU_CORES }} V=0 && break
           sleep 10
         done
         
-        # 清理空的下载文件
         find dl -size 0 -delete 2>/dev/null || true
         
         echo "下载的包大小:"
@@ -241,26 +214,20 @@ EOF
       run: |
         cd ${{ env.BUILD_DIR }}/immortalwrt
         
-        # 设置编译环境限制
-        ulimit -s 8192  # 限制栈大小
-        ulimit -n 1024  # 限制文件描述符
+        ulimit -s 8192
+        ulimit -n 1024
         
-        # 编译内核（单独编译以减少内存使用）
         echo "开始编译内核..."
         make -j${{ env.MAKE_JOBS }} target/linux/{clean,prepare} V=s 2>&1 | tee -a build_kernel.log
         
-        # 编译固件（使用较少并行任务）
         echo "开始编译固件..."
-        make -j${{ env.MAKE_JOBS }} V=0 2>&1 | tee build.log || \
-          make -j1 V=s 2>&1 | tee build_fallback.log
+        make -j${{ env.MAKE_JOBS }} V=0 2>&1 | tee build.log || make -j1 V=s 2>&1 | tee build_fallback.log
         
-        # 检查构建结果
         IMG_PATH="bin/targets/x86/64"
         if [ -f "$IMG_PATH/immortalwrt-x86-64-generic-squashfs-combined.img.gz" ]; then
           echo "✅ 固件编译成功！"
           ls -lh $IMG_PATH/*.img*
           
-          # 记录最终大小
           echo "最终固件大小:"
           du -sh $IMG_PATH/
         else
@@ -273,24 +240,17 @@ EOF
       run: |
         cd ${{ env.BUILD_DIR }}/immortalwrt
         
-        # 保留必要的文件，删除中间文件
         echo "清理中间文件以节省空间..."
         
-        # 保留的目录
-        KEEP_DIRS="bin/targets/x86/64 dl .config build.log"
-        
-        # 计算清理前大小
         echo "清理前大小:"
         du -sh . || true
         
-        # 删除大部分中间文件，但要小心
         rm -rf build_dir/*/linux-* 2>/dev/null || true
         rm -rf build_dir/*/toolchain-* 2>/dev/null || true
         rm -rf staging_dir/* 2>/dev/null || true
         rm -rf tmp/* 2>/dev/null || true
         rm -rf logs/* 2>/dev/null || true
         
-        # 清理源码目录中的大文件
         find . -name "*.o" -delete 2>/dev/null || true
         find . -name "*.a" -delete 2>/dev/null || true
         find . -name "*.ko" -delete 2>/dev/null || true
@@ -306,7 +266,7 @@ EOF
           ${{ env.BUILD_DIR }}/immortalwrt/bin/targets/x86/64/*.img.gz
           ${{ env.BUILD_DIR }}/immortalwrt/bin/targets/x86/64/*.manifest
         retention-days: 7
-        compression-level: 0  # 禁用压缩，因为固件已经压缩过
+        compression-level: 0
         
     - name: Upload minimal logs
       if: always()
