@@ -13,7 +13,7 @@ on:
           - light
 
 env:
-  MAKE_JOBS: 1  # 使用单线程编译，避免内存不足
+  MAKE_JOBS: 1
   BUILD_DIR: /tmp/immortalwrt-build
 
 jobs:
@@ -26,7 +26,6 @@ jobs:
       run: |
         echo "=== 初始磁盘空间 ==="
         df -h
-        echo "可用内存:"
         free -h
         
     - name: Cleanup system
@@ -52,7 +51,6 @@ jobs:
           python3 python3-distutils git wget file gawk \
           zlib1g-dev gettext gcc g++ make bash
         
-        # 清理安装缓存
         sudo apt-get clean
         
     - name: Prepare build directory
@@ -66,13 +64,10 @@ jobs:
         cd ${{ env.BUILD_DIR }}
         
         echo "克隆源码..."
-        # 使用浅克隆，只下载必要文件
-        git clone \
-          --depth 1 \
-          --no-checkout \
-          https://github.com/immortalwrt/immortalwrt.git .
-        
-        git checkout openwrt-25.12 -- .
+        git init
+        git remote add origin https://github.com/immortalwrt/immortalwrt.git
+        git fetch --depth 1 origin openwrt-25.12
+        git checkout FETCH_HEAD
         
         echo "源码大小:"
         du -sh .
@@ -83,17 +78,27 @@ jobs:
         
         echo "创建最小化配置..."
         
-        # 创建绝对最小化配置 - 仅包含必须功能
-        cat > .config << 'EOF'
-CONFIG_TARGET_x86_64=y
-CONFIG_TARGET_ROOTFS_SQUASHFS=y
-CONFIG_TARGET_IMAGES_GZIP=y
-CONFIG_BUSYBOX_DEFAULT_FEATURE_EDITING=n
-CONFIG_PACKAGE_luci=y
-CONFIG_PACKAGE_luci-base=y
-EOF
+        # 使用多个echo命令避免heredoc语法
+        echo "CONFIG_TARGET_x86_64=y" > .config
+        echo "CONFIG_TARGET_x86_64_DEVICE_generic=y" >> .config
+        echo "CONFIG_TARGET_ROOTFS_PARTSIZE=256" >> .config
+        echo "CONFIG_TARGET_KERNEL_PARTSIZE=16" >> .config
+        echo "CONFIG_TARGET_ROOTFS_SQUASHFS=y" >> .config
+        echo "CONFIG_TARGET_IMAGES_GZIP=y" >> .config
         
-        # 显示配置
+        # 根据构建类型添加配置
+        if [ "${{ github.event.inputs.build_type }}" = "light" ]; then
+          echo "CONFIG_PACKAGE_luci=y" >> .config
+          echo "CONFIG_PACKAGE_luci-base=y" >> .config
+          echo "CONFIG_PACKAGE_luci-mod-admin-full=y" >> .config
+          echo "CONFIG_PACKAGE_iperf3=y" >> .config
+          echo "CONFIG_PACKAGE_ethtool=y" >> .config
+        else
+          # minimal构建 - 绝对最小
+          echo "CONFIG_BUSYBOX_CONFIG_FEATURE_VI_USE_SIGNALS=n" >> .config
+          echo "CONFIG_BUSYBOX_CONFIG_FEATURE_EDITING=n" >> .config
+        fi
+        
         echo "配置内容:"
         cat .config
         
@@ -102,7 +107,6 @@ EOF
         cd ${{ env.BUILD_DIR }}
         
         echo "更新feeds..."
-        # 只更新必要的feeds
         ./scripts/feeds update packages
         ./scripts/feeds install -a
         
@@ -116,7 +120,7 @@ EOF
         echo "最终配置摘要:"
         ./scripts/diffconfig.sh
         
-    - name: Download packages with monitoring
+    - name: Download packages
       run: |
         cd ${{ env.BUILD_DIR }}
         
@@ -124,8 +128,7 @@ EOF
         echo "当前磁盘空间:"
         df -h
         
-        # 单个下载，避免内存问题
-        make download V=s 2>&1 | tail -50
+        make download V=0 || make download V=s
         
         echo "下载后空间:"
         df -h
@@ -137,26 +140,12 @@ EOF
         echo "=== 开始编译 ==="
         echo "编译前磁盘空间:"
         df -h
-        echo "可用内存:"
-        free -h
         
-        # 编译工具链
-        echo "1. 编译工具链..."
-        make toolchain/install -j${{ env.MAKE_JOBS }} V=0 2>&1 | tail -100 || echo "工具链编译可能有问题"
+        # 尝试编译
+        echo "编译中..."
+        make -j${{ env.MAKE_JOBS }} V=s 2>&1 | tail -200 || echo "编译可能有问题"
         
-        # 编译内核
-        echo "2. 编译内核..."
-        make target/linux/compile -j${{ env.MAKE_JOBS }} V=0 2>&1 | tail -100 || echo "内核编译可能有问题"
-        
-        # 编译根文件系统
-        echo "3. 编译根文件系统..."
-        make package/compile -j${{ env.MAKE_JOBS }} V=0 2>&1 | tail -100 || echo "包编译可能有问题"
-        
-        # 最终镜像
-        echo "4. 生成镜像..."
-        make -j${{ env.MAKE_JOBS }} V=s 2>&1 | tail -200
-        
-        echo "编译完成..."
+        echo "编译步骤完成..."
         
     - name: Check build results
       run: |
@@ -164,19 +153,12 @@ EOF
         
         echo "查找生成的固件..."
         
-        # 检查所有可能的输出文件
-        find . -name "*.img" -o -name "*.img.gz" -o -name "*.bin" 2>/dev/null | head -20
+        # 检查输出
+        find . -name "*.img" -o -name "*.img.gz" -o -name "*.bin" 2>/dev/null | head -10
         
-        # 检查特定目录
         if [ -d "bin/targets/x86/64" ]; then
           echo "x86/64 目录内容:"
-          ls -la bin/targets/x86/64/ || true
-        fi
-        
-        # 检查构建日志
-        if [ -f "logs/build.log" ]; then
-          echo "构建日志最后100行:"
-          tail -100 logs/build.log || true
+          ls -la bin/targets/x86/64/ 2>/dev/null || true
         fi
         
     - name: Collect artifacts if successful
@@ -184,22 +166,16 @@ EOF
       run: |
         cd ${{ env.BUILD_DIR }}
         
-        # 查找并复制固件
         IMG_FILE=$(find bin/targets/x86/64 -name "*.img.gz" 2>/dev/null | head -1)
         
         if [ -f "$IMG_FILE" ]; then
           echo "✅ 找到固件: $IMG_FILE"
           ls -lh "$IMG_FILE"
           
-          # 复制到工作空间
           mkdir -p $GITHUB_WORKSPACE/artifacts
           cp "$IMG_FILE" $GITHUB_WORKSPACE/artifacts/
-          
-          # 生成校验和
-          sha256sum "$IMG_FILE" > "$IMG_FILE.sha256"
-          cp "$IMG_FILE.sha256" $GITHUB_WORKSPACE/artifacts/
         else
-          echo "⚠️ 未找到标准固件，但编译成功"
+          echo "⚠️ 未找到标准固件"
         fi
         
     - name: Upload artifacts
@@ -217,21 +193,13 @@ EOF
         
         echo "=== 编译失败，收集日志 ==="
         
-        # 收集错误日志
         mkdir -p $GITHUB_WORKSPACE/logs
         
-        # 查找各种日志文件
-        find . -name "*.log" -type f | head -10 | while read log; do
-          echo "收集日志: $log"
+        # 简单收集.log文件
+        for log in $(find . -name "*.log" -type f 2>/dev/null | head -5); do
+          echo "复制日志: $log"
           cp "$log" $GITHUB_WORKSPACE/logs/ 2>/dev/null || true
         done
-        
-        # 收集config文件
-        cp .config $GITHUB_WORKSPACE/logs/ 2>/dev/null || true
-        
-        # 显示最后错误
-        echo "可能的错误:"
-        find . -name "*.log" -type f -exec tail -50 {} \; 2>/dev/null | tail -200 || true
         
     - name: Upload failure logs
       if: failure()
@@ -246,16 +214,11 @@ EOF
       run: |
         echo "=== 最终清理 ==="
         
-        # 清理构建目录
         rm -rf ${{ env.BUILD_DIR }} 2>/dev/null || true
-        
-        # 清理临时文件
         rm -rf /tmp/* 2>/dev/null || true
         
         echo "最终磁盘空间:"
         df -h
-        echo "最终内存使用:"
-        free -h
         
     - name: Success message
       if: success()
@@ -267,14 +230,4 @@ EOF
       if: failure()
       run: |
         echo "❌ 编译失败"
-        echo ""
-        echo "常见原因:"
-        echo "1. 磁盘空间不足 - GitHub Actions只有14GB"
-        echo "2. 内存不足 - 编译需要大量内存"
-        echo "3. 网络问题 - 下载包失败"
-        echo "4. 依赖问题 - 缺少必要的工具"
-        echo ""
-        echo "建议:"
-        echo "1. 查看上传的日志文件"
-        echo "2. 考虑使用自托管Runner"
-        echo "3. 在本地机器上编译"
+        echo "请查看日志分析具体原因"
