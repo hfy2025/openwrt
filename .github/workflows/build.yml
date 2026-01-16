@@ -19,7 +19,7 @@ env:
 jobs:
   build:
     runs-on: ubuntu-22.04
-    timeout-minutes: 180  # 3小时超时
+    #timeout-minutes: 180  # 3小时超时
     
     steps:
     - name: Initial setup
