@@ -9,8 +9,8 @@ on:
         default: 'minimal'
         type: choice
         options:
-          - minimal
-          - test
+          - 精简版
+          - 标准版
 
 env:
   BUILD_DIR: /tmp/immortalwrt
